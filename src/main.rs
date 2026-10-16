@@ -1,0 +1,3 @@
+mod annotation;
+
+fn main() {}

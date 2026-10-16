@@ -1,0 +1,9 @@
+[package]
+name = "printmark"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ashpd = "0.13.13"
+cairo-rs = { version = "0.22", features = ["png"] }
+gtk4 = { version = "0.11.5", features = ["v4_16"] }
