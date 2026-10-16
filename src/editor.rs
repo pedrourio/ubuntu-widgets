@@ -27,7 +27,8 @@ struct Editor {
     tool: Tool,
     color: usize,
     base: cairo::ImageSurface,
-    // Task 7: text editing state goes here.
+    /// A `Shape::Text` being typed (drawn with a caret, not yet in `doc`).
+    editing: Option<Shape>,
     // Task 8: `image: PathBuf` (clean file) and `fn finish(&self, action: Finish)` go here.
 }
 
@@ -58,6 +59,37 @@ impl Editor {
             _ => {}
         }
     }
+
+    fn text_mut(&mut self) -> Option<&mut String> {
+        match &mut self.editing {
+            Some(Shape::Text { text, .. }) => Some(text),
+            _ => None,
+        }
+    }
+
+    /// Pops one whole char (not a byte) of the text being typed.
+    fn backspace(&mut self) -> Option<char> {
+        self.text_mut().and_then(String::pop)
+    }
+
+    /// Ends editing; `doc.push` drops empty/whitespace-only text.
+    fn commit_text(&mut self) {
+        if let Some(s) = self.editing.take() {
+            self.doc.push(s);
+        }
+    }
+}
+
+/// Detaches the IM before committing so dead-key state can't leak into shortcuts.
+/// No borrow is held while touching the IM: reset/focus_out may emit `commit`.
+fn stop_editing(ed: &RefCell<Editor>, keys: &gtk4::EventControllerKey, im: &gtk4::IMMulticontext) {
+    if ed.borrow().editing.is_none() {
+        return;
+    }
+    keys.set_im_context(None::<&gtk4::IMContext>);
+    im.focus_out();
+    im.reset();
+    ed.borrow_mut().commit_text();
 }
 
 pub fn open(app: &gtk4::Application, image: PathBuf) {
@@ -81,6 +113,7 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
         tool: prefs.tool,
         color: prefs.color,
         base,
+        editing: None,
     }));
 
     let window = gtk4::ApplicationWindow::builder().application(app).title("printmark").build();
@@ -125,9 +158,29 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
             if cr.set_source_surface(&e.base, 0.0, 0.0).is_ok() {
                 let _ = cr.paint();
             }
-            for s in e.doc.shapes.iter().chain(e.draft.as_ref()) {
+            for s in e.doc.shapes.iter().chain(e.draft.as_ref()).chain(e.editing.as_ref()) {
                 render::draw_shape(cr, s);
             }
+            if let Some(Shape::Text { at, text, color }) = &e.editing {
+                render::draw_caret(cr, *at, text, *color);
+            }
+        });
+    }
+
+    // Typing goes through the IM so dead keys and ç/ã compose. It is attached to
+    // the key controller only while editing (the IM filters keys before
+    // key-pressed fires, so attached it would swallow the letter shortcuts).
+    let keys = gtk4::EventControllerKey::new();
+    let im = gtk4::IMMulticontext::new();
+    im.set_client_widget(Some(&area));
+    {
+        let ed = ed.clone();
+        let area = area.clone();
+        im.connect_commit(move |_, s| {
+            if let Some(text) = ed.borrow_mut().text_mut() {
+                text.push_str(s);
+            }
+            area.queue_draw();
         });
     }
     // Resize refits (in the draw func) as long as the user hasn't zoomed/panned.
@@ -138,12 +191,26 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
     {
         let ed = ed.clone();
         let area = area.clone();
+        let (keys, im) = (keys.clone(), im.clone());
         drag.connect_drag_begin(move |_, x, y| {
+            // Any click ends the text being typed; with Texto it starts a new one.
+            stop_editing(&ed, &keys, &im);
             let mut e = ed.borrow_mut();
             let p = e.view.to_image(x, y);
-            if e.tool == Tool::Number {
-                let s = Shape::Number { at: p, n: e.doc.next_number(), color: e.rgb() };
-                e.doc.push(s);
+            match e.tool {
+                Tool::Number => {
+                    let s = Shape::Number { at: p, n: e.doc.next_number(), color: e.rgb() };
+                    e.doc.push(s);
+                }
+                Tool::Text => {
+                    e.editing = Some(Shape::Text { at: p, text: String::new(), color: e.rgb() });
+                    drop(e);
+                    keys.set_im_context(Some(&im));
+                    im.focus_in();
+                    area.queue_draw();
+                    return;
+                }
+                _ => {}
             }
             e.draft = e.start_shape(p);
             area.queue_draw();
@@ -236,8 +303,10 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
         b.set_active(tool == prefs.tool);
         let ed = ed.clone();
         let area = area.clone();
+        let (keys, im) = (keys.clone(), im.clone());
         b.connect_toggled(move |b| {
             if b.is_active() {
+                stop_editing(&ed, &keys, &im);
                 ed.borrow_mut().tool = tool;
                 area.queue_draw();
             }
@@ -266,7 +335,11 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
         let area = area.clone();
         b.connect_toggled(move |b| {
             if b.is_active() {
-                ed.borrow_mut().color = i;
+                let mut e = ed.borrow_mut();
+                e.color = i;
+                if let Some(Shape::Text { color, .. }) = &mut e.editing {
+                    *color = PALETTE[i];
+                }
                 area.queue_draw();
             }
         });
@@ -277,7 +350,12 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
 
     let undo = move |ed: &RefCell<Editor>, area: &gtk4::DrawingArea, redo: bool| {
         let mut e = ed.borrow_mut();
-        if redo { e.doc.redo() } else { e.doc.undo() };
+        // While typing, undo removes the last typed char first.
+        if redo {
+            e.doc.redo();
+        } else if e.backspace().is_none() {
+            e.doc.undo();
+        }
         area.queue_draw();
     };
     let undo_button = gtk4::Button::builder()
@@ -312,25 +390,43 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
     copy.connect_clicked(glib::clone!(#[weak] window, move |_| window.close()));
     bar.append(&copy);
 
-    let keys = gtk4::EventControllerKey::new();
     // Capture phase: shortcuts win over whatever button happens to hold focus.
     keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
     {
         let ed = ed.clone();
         let area = area.clone();
+        let keys_ = keys.clone();
         keys.connect_key_pressed(move |_, key, _, mods| {
             let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
             let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
             let other = mods.intersects(gdk::ModifierType::ALT_MASK | gdk::ModifierType::SUPER_MASK);
             let lower = key.to_lower();
+            // Printable keys never get here while editing: the IM consumed them.
+            let editing = ed.borrow().editing.is_some();
             if key == gdk::Key::Escape && !ctrl && !other {
-                discard.emit_clicked();
+                if editing {
+                    stop_editing(&ed, &keys_, &im);
+                    area.queue_draw();
+                } else {
+                    discard.emit_clicked();
+                }
             } else if ctrl && !other && lower == gdk::Key::z {
                 undo(&ed, &area, shift);
             } else if ctrl && !shift && !other && lower == gdk::Key::c {
                 copy.emit_clicked();
             } else if ctrl || other {
                 return glib::Propagation::Proceed;
+            } else if editing {
+                if let Some(text) = ed.borrow_mut().text_mut() {
+                    match key {
+                        gdk::Key::BackSpace => {
+                            text.pop();
+                        }
+                        gdk::Key::Return | gdk::Key::KP_Enter => text.push('\n'),
+                        _ => {}
+                    }
+                }
+                area.queue_draw();
             } else if let Some(c) = key.to_unicode() {
                 if let Some(d) = c.to_digit(10).filter(|d| (1..=6).contains(d)) {
                     color_buttons[d as usize - 1].set_active(true);
@@ -363,4 +459,49 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
     window.set_child(Some(&overlay));
     window.maximize();
     window.present();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn editor() -> Editor {
+        Editor {
+            doc: Doc::default(),
+            draft: None,
+            view: View { scale: 1.0, ox: 0.0, oy: 0.0 },
+            manual_view: false,
+            pointer: (0.0, 0.0),
+            tool: Tool::Text,
+            color: 0,
+            base: cairo::ImageSurface::create(cairo::Format::ARgb32, 4, 4).unwrap(),
+            editing: Some(Shape::Text { at: Point { x: 0.0, y: 0.0 }, text: String::new(), color: PALETTE[0] }),
+        }
+    }
+
+    #[test]
+    fn backspace_pops_whole_chars() {
+        let mut e = editor();
+        e.text_mut().unwrap().push_str("Atenção");
+        assert_eq!(e.backspace(), Some('o'));
+        assert_eq!(e.backspace(), Some('ã'));
+        assert_eq!(e.backspace(), Some('ç'));
+        assert_eq!(e.text_mut().unwrap(), "Aten");
+    }
+
+    #[test]
+    fn commit_keeps_text_and_drops_empty() {
+        let mut e = editor();
+        e.text_mut().unwrap().push_str("é");
+        e.commit_text();
+        assert!(e.editing.is_none());
+        assert_eq!(e.doc.shapes.len(), 1);
+
+        let mut e = editor();
+        e.text_mut().unwrap().push_str(" \n");
+        e.commit_text();
+        assert!(e.editing.is_none());
+        assert!(e.doc.shapes.is_empty());
+        assert_eq!(e.backspace(), None); // not editing: Ctrl+Z falls through to doc.undo
+    }
 }

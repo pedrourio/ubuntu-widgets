@@ -119,6 +119,19 @@ pub fn draw_shape(cr: &Context, s: &Shape) {
     let _ = cr.restore();
 }
 
+/// Thin caret after the last char of a text being typed; same metrics as `Shape::Text`.
+pub fn draw_caret(cr: &Context, at: Point, text: &str, color: Rgb) {
+    let _ = cr.save();
+    rgba(cr, color, 1.0);
+    font(cr, TEXT_SIZE);
+    let (i, last) = text.split('\n').enumerate().last().unwrap_or((0, ""));
+    let x = at.x + cr.text_extents(last).map(|e| e.x_advance()).unwrap_or(0.0);
+    let h = cr.font_extents().map(|e| e.ascent() + e.descent()).unwrap_or(TEXT_SIZE);
+    cr.rectangle(x + 1.0, at.y + i as f64 * TEXT_SIZE * 1.2, 2.0, h);
+    let _ = cr.fill();
+    let _ = cr.restore();
+}
+
 #[cfg_attr(not(test), expect(dead_code, reason = "used by Copiar (Task 8)"))]
 pub fn export_png(base: &ImageSurface, shapes: &[Shape]) -> Result<Vec<u8>, cairo::Error> {
     let out = ImageSurface::create(Format::ARgb32, base.width(), base.height())?;

@@ -63,7 +63,6 @@ pub enum Shape {
     Ellipse { a: Point, b: Point, color: Rgb },
     Pen { points: Vec<Point>, color: Rgb },
     Highlight { points: Vec<Point>, color: Rgb },
-    #[cfg_attr(not(test), expect(dead_code, reason = "created by text editing (Task 7)"))]
     Text { at: Point, text: String, color: Rgb },
     Number { at: Point, n: u32, color: Rgb },
     Redact { a: Point, b: Point },
