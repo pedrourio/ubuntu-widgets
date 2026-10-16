@@ -12,7 +12,7 @@ impl View {
     pub fn to_image(&self, wx: f64, wy: f64) -> Point {
         Point { x: (wx - self.ox) / self.scale, y: (wy - self.oy) / self.scale }
     }
-    #[cfg_attr(not(test), expect(dead_code, reason = "used by the text caret (Task 7)"))]
+    #[cfg(test)]
     pub fn to_widget(&self, p: Point) -> (f64, f64) {
         (p.x * self.scale + self.ox, p.y * self.scale + self.oy)
     }
