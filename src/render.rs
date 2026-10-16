@@ -119,6 +119,7 @@ pub fn draw_shape(cr: &Context, s: &Shape) {
     let _ = cr.restore();
 }
 
+#[cfg_attr(not(test), expect(dead_code, reason = "used by Copiar (Task 8)"))]
 pub fn export_png(base: &ImageSurface, shapes: &[Shape]) -> Result<Vec<u8>, cairo::Error> {
     let out = ImageSurface::create(Format::ARgb32, base.width(), base.height())?;
     {

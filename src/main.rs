@@ -1,5 +1,6 @@
 mod annotation;
 mod capture;
+mod editor;
 mod render;
 mod state;
 mod view;
@@ -25,7 +26,8 @@ fn main() -> glib::ExitCode {
                     std::process::exit(1);
                 }
                 Ok(p) => match capture::store(&p, &capture::screenshots_dir(), &glib::DateTime::now_local().unwrap()) {
-                    Ok(p) => println!("{}", p.display()),
+                    // The window holds the app from here; `_guard` can drop.
+                    Ok(p) => return editor::open(&app, p),
                     Err(e) => {
                         eprintln!("printmark: {e}");
                         std::process::exit(1);

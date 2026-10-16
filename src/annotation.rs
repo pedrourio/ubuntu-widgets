@@ -63,6 +63,7 @@ pub enum Shape {
     Ellipse { a: Point, b: Point, color: Rgb },
     Pen { points: Vec<Point>, color: Rgb },
     Highlight { points: Vec<Point>, color: Rgb },
+    #[cfg_attr(not(test), expect(dead_code, reason = "created by text editing (Task 7)"))]
     Text { at: Point, text: String, color: Rgb },
     Number { at: Point, n: u32, color: Rgb },
     Redact { a: Point, b: Point },
@@ -70,6 +71,15 @@ pub enum Shape {
 
 impl Shape {
     pub fn is_degenerate(&self) -> bool {
+        let pts: &[Point] = match self {
+            Shape::Arrow { from, to, .. } => &[*from, *to],
+            Shape::Rect { a, b, .. } | Shape::Ellipse { a, b, .. } | Shape::Redact { a, b } => &[*a, *b],
+            Shape::Pen { points, .. } | Shape::Highlight { points, .. } => points,
+            Shape::Text { at, .. } | Shape::Number { at, .. } => &[*at],
+        };
+        if pts.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+            return true;
+        }
         let d = |a: &Point, b: &Point| ((b.x - a.x).abs(), (b.y - a.y).abs());
         match self {
             Shape::Arrow { from, to, .. } => {
@@ -129,6 +139,17 @@ mod tests {
         assert!(!d.push(Shape::Pen { points: vec![q], color: PALETTE[0] }));
         assert!(d.shapes.is_empty());
         assert!(d.push(Shape::Number { at: q, n: 1, color: PALETTE[0] }));
+    }
+
+    #[test]
+    fn non_finite_shapes_are_rejected() {
+        let mut d = Doc::default();
+        let q = p(10.0, 10.0);
+        assert!(!d.push(Shape::Redact { a: q, b: p(f64::NAN, 50.0) }));
+        assert!(!d.push(Shape::Rect { a: p(f64::INFINITY, 0.0), b: p(50.0, 50.0), color: PALETTE[0] }));
+        assert!(!d.push(Shape::Pen { points: vec![q, p(20.0, f64::NAN)], color: PALETTE[0] }));
+        assert!(!d.push(Shape::Number { at: p(f64::NAN, f64::NAN), n: 1, color: PALETTE[0] }));
+        assert!(d.shapes.is_empty());
     }
 
     #[test]
