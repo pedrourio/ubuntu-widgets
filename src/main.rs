@@ -1,5 +1,6 @@
 mod annotation;
 mod capture;
+mod clipboard;
 mod editor;
 mod render;
 mod state;
@@ -25,14 +26,18 @@ fn main() -> glib::ExitCode {
                     app.quit();
                     std::process::exit(1);
                 }
-                Ok(p) => match capture::store(&p, &capture::screenshots_dir(), &glib::DateTime::now_local().unwrap()) {
-                    // The window holds the app from here; `_guard` can drop.
-                    Ok(p) => return editor::open(&app, p),
-                    Err(e) => {
-                        eprintln!("printmark: {e}");
-                        std::process::exit(1);
+                Ok(p) => {
+                    let t0 = std::time::Instant::now();
+                    let t0 = std::env::var("PRINTMARK_TIMING").is_ok_and(|v| v == "1").then_some(t0);
+                    match capture::store(&p, &capture::screenshots_dir(), &glib::DateTime::now_local().unwrap()) {
+                        // The window holds the app from here; `_guard` can drop.
+                        Ok(p) => return editor::open(&app, p, t0),
+                        Err(e) => {
+                            eprintln!("printmark: {e}");
+                            std::process::exit(1);
+                        }
                     }
-                },
+                }
             }
             app.quit();
         });

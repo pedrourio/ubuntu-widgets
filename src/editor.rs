@@ -1,11 +1,12 @@
 use crate::annotation::{Doc, Point, Rgb, Shape, Tool, ALL_TOOLS, PALETTE};
 use crate::view::View;
-use crate::{render, state};
+use crate::{clipboard, render, state};
 use gtk4::prelude::*;
 use gtk4::{gdk, glib};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Instant;
 
 const BACKGROUND: f64 = 0x1e as f64 / 255.0;
 const COLOR_NAMES: [&str; 6] = ["Vermelho", "Amarelo", "Verde", "Azul", "Preto", "Branco"];
@@ -14,6 +15,7 @@ const CSS: &str = "
 .printmark-bar button { padding: 4px 10px; }
 .printmark-bar button.printmark-copy { padding: 6px 18px; }
 .printmark-bar button.printmark-swatch-button { padding: 4px; }
+.printmark-key { font-size: smaller; }
 .printmark-swatch { min-width: 18px; min-height: 18px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.6); }
 ";
 
@@ -29,7 +31,14 @@ struct Editor {
     base: cairo::ImageSurface,
     /// A `Shape::Text` being typed (drawn with a caret, not yet in `doc`).
     editing: Option<Shape>,
-    // Task 8: `image: PathBuf` (clean file) and `fn finish(&self, action: Finish)` go here.
+    /// The clean PNG on disk (what Descartar puts on the clipboard).
+    image: PathBuf,
+}
+
+#[derive(Clone, Copy)]
+enum Finish {
+    Copy,
+    Discard,
 }
 
 impl Editor {
@@ -78,6 +87,21 @@ impl Editor {
             self.doc.push(s);
         }
     }
+
+    /// PNG bytes for the clipboard. A failed export falls back to the clean image,
+    /// so the clipboard is never left empty.
+    fn png(&self, f: Finish) -> Option<Vec<u8>> {
+        if let Finish::Copy = f {
+            match render::export_png(&self.base, &self.doc.shapes) {
+                Ok(png) => return Some(png),
+                Err(e) => eprintln!("printmark: export failed, copying the clean image: {e}"),
+            }
+        }
+        std::fs::read(&self.image)
+            .inspect_err(|e| eprintln!("printmark: {}: {e}", self.image.display()))
+            .ok()
+            .or_else(|| render::export_png(&self.base, &[]).ok())
+    }
 }
 
 /// Detaches the IM before committing so dead-key state can't leak into shortcuts.
@@ -92,7 +116,8 @@ fn stop_editing(ed: &RefCell<Editor>, keys: &gtk4::EventControllerKey, im: &gtk4
     ed.borrow_mut().commit_text();
 }
 
-pub fn open(app: &gtk4::Application, image: PathBuf) {
+/// `t0`: the portal response time, set only when PRINTMARK_TIMING=1.
+pub fn open(app: &gtk4::Application, image: PathBuf, t0: Option<Instant>) {
     let base = match std::fs::File::open(&image)
         .map_err(|e| e.to_string())
         .and_then(|mut f| cairo::ImageSurface::create_from_png(&mut f).map_err(|e| e.to_string()))
@@ -114,6 +139,7 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
         color: prefs.color,
         base,
         editing: None,
+        image,
     }));
 
     let window = gtk4::ApplicationWindow::builder().application(app).title("printmark").build();
@@ -140,7 +166,11 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
     let area = gtk4::DrawingArea::builder().hexpand(true).vexpand(true).build();
     {
         let ed = ed.clone();
+        let t0 = Cell::new(t0);
         area.set_draw_func(move |_, cr, w, h| {
+            if let Some(t) = t0.take() {
+                eprintln!("printmark: {} ms from portal response to first draw", t.elapsed().as_millis());
+            }
             let mut e = ed.borrow_mut();
             // Never fit on a 0×0 allocation: scale 0 would make to_image return NaN.
             if !e.manual_view && w > 0 && h > 0 {
@@ -373,21 +403,53 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
     let spacer = gtk4::Box::builder().width_request(24).build();
     bar.append(&spacer);
 
-    // Task 8 replaces these closes with finish(Discard) / finish(Copy).
+    // Runs at most once: commits typed text, saves prefs, hands the PNG to the
+    // clipboard and destroys the window. No borrow is held across hand_off.
+    let finish: Rc<dyn Fn(Finish)> = {
+        let ed = ed.clone();
+        let (keys, im) = (keys.clone(), im.clone());
+        let app = app.clone();
+        let window = window.downgrade();
+        let done = Cell::new(false);
+        Rc::new(move |f| {
+            let Some(window) = window.upgrade() else { return };
+            if done.replace(true) {
+                return;
+            }
+            stop_editing(&ed, &keys, &im);
+            let png = {
+                let e = ed.borrow();
+                if let Err(err) = state::save(&state::path(), state::Prefs { tool: e.tool, color: e.color }) {
+                    eprintln!("printmark: saving state: {err}");
+                }
+                e.png(f)
+            };
+            match png {
+                Some(png) => clipboard::hand_off(&app, &window, glib::Bytes::from_owned(png)),
+                None => window.destroy(),
+            }
+        })
+    };
     let discard = gtk4::Button::builder()
-        .label("Descartar")
+        .child(&key_label("Descartar", "Esc"))
         .tooltip_text("Descartar (Esc)")
         .focus_on_click(false)
         .build();
-    discard.connect_clicked(glib::clone!(#[weak] window, move |_| window.close()));
+    {
+        let finish = finish.clone();
+        discard.connect_clicked(move |_| finish(Finish::Discard));
+    }
     bar.append(&discard);
     let copy = gtk4::Button::builder()
-        .label("Copiar")
+        .child(&key_label("Copiar", "Ctrl+C"))
         .tooltip_text("Copiar (Ctrl+C)")
         .focus_on_click(false)
         .css_classes(["suggested-action", "printmark-copy"])
         .build();
-    copy.connect_clicked(glib::clone!(#[weak] window, move |_| window.close()));
+    {
+        let finish = finish.clone();
+        copy.connect_clicked(move |_| finish(Finish::Copy));
+    }
     bar.append(&copy);
 
     // Capture phase: shortcuts win over whatever button happens to hold focus.
@@ -444,13 +506,10 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
     }
     window.add_controller(keys);
 
-    // Remember tool/color however the window closes (buttons, Esc, title bar).
+    // Closing from the title bar / Alt+F4 is Descartar; finish destroys the window.
     window.connect_close_request(move |_| {
-        let e = ed.borrow();
-        if let Err(err) = state::save(&state::path(), state::Prefs { tool: e.tool, color: e.color }) {
-            eprintln!("printmark: saving state: {err}");
-        }
-        glib::Propagation::Proceed
+        finish(Finish::Discard);
+        glib::Propagation::Stop
     });
 
     let overlay = gtk4::Overlay::new();
@@ -459,6 +518,17 @@ pub fn open(app: &gtk4::Application, image: PathBuf) {
     window.set_child(Some(&overlay));
     window.maximize();
     window.present();
+}
+
+/// Button content: the action plus its key, dimmer and smaller.
+fn key_label(text: &str, key: &str) -> gtk4::Box {
+    let b = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    b.append(&gtk4::Label::new(Some(text)));
+    let k = gtk4::Label::new(Some(key));
+    k.add_css_class("dim-label");
+    k.add_css_class("printmark-key");
+    b.append(&k);
+    b
 }
 
 #[cfg(test)]
@@ -476,7 +546,21 @@ mod tests {
             color: 0,
             base: cairo::ImageSurface::create(cairo::Format::ARgb32, 4, 4).unwrap(),
             editing: Some(Shape::Text { at: Point { x: 0.0, y: 0.0 }, text: String::new(), color: PALETTE[0] }),
+            image: PathBuf::from("/nonexistent/printmark-clean.png"),
         }
+    }
+
+    #[test]
+    fn discard_reads_clean_file_copy_exports() {
+        let mut e = editor();
+        e.image = std::env::temp_dir().join(format!("printmark-{}-clean.png", std::process::id()));
+        std::fs::write(&e.image, b"clean bytes").unwrap();
+        assert_eq!(e.png(Finish::Discard).unwrap(), b"clean bytes");
+        let copy = e.png(Finish::Copy).unwrap();
+        assert!(copy.starts_with(b"\x89PNG"));
+        std::fs::remove_file(&e.image).unwrap();
+        // Clean file gone: Descartar still yields the clean image, never nothing.
+        assert!(e.png(Finish::Discard).unwrap().starts_with(b"\x89PNG"));
     }
 
     #[test]
