@@ -29,6 +29,8 @@ struct Editor {
     tool: Tool,
     color: usize,
     base: cairo::ImageSurface,
+    /// `base` pre-scaled for the current `view.scale` (see `scaled_base`).
+    scaled: Option<(f64, cairo::ImageSurface)>,
     /// A `Shape::Text` being typed (drawn with a caret, not yet in `doc`).
     editing: Option<Shape>,
     /// The clean PNG on disk (what Descartar puts on the clipboard).
@@ -81,6 +83,28 @@ impl Editor {
         self.text_mut().and_then(String::pop)
     }
 
+    /// Commits the shape being dragged; `doc.push` drops degenerate ones.
+    fn commit_draft(&mut self) {
+        if let Some(s) = self.draft.take() {
+            self.doc.push(s);
+        }
+    }
+
+    /// `base` scaled down to the view, rebuilt only when the scale changes:
+    /// painting the full-res base every frame costs ~25 ms at 5760×1080.
+    /// None at scale >= 1, where cairo samples only the visible part anyway.
+    fn scaled_base(&mut self) -> Option<&cairo::ImageSurface> {
+        let s = self.view.scale;
+        if s >= 1.0 {
+            self.scaled = None;
+            return None;
+        }
+        if self.scaled.as_ref().is_none_or(|(k, _)| *k != s) {
+            self.scaled = scale_surface(&self.base, s).ok().map(|img| (s, img));
+        }
+        self.scaled.as_ref().map(|(_, img)| img)
+    }
+
     /// Ends editing; `doc.push` drops empty/whitespace-only text.
     fn commit_text(&mut self) {
         if let Some(s) = self.editing.take() {
@@ -90,7 +114,9 @@ impl Editor {
 
     /// PNG bytes for the clipboard. Copy never falls back to the clean image: a
     /// tarja must not leak, so a failed export yields None (the editor stays open).
-    fn png(&self, f: Finish) -> Option<Vec<u8>> {
+    /// A shape still being dragged is committed first: the copy matches the screen.
+    fn png(&mut self, f: Finish) -> Option<Vec<u8>> {
+        self.commit_draft();
         if let Finish::Copy = f {
             return render::export_png(&self.base, &self.doc.shapes)
                 .inspect_err(|e| eprintln!("printmark: export failed, nothing copied: {e}"))
@@ -101,6 +127,17 @@ impl Editor {
             .ok()
             .or_else(|| render::export_png(&self.base, &[]).ok())
     }
+}
+
+fn scale_surface(base: &cairo::ImageSurface, s: f64) -> Result<cairo::ImageSurface, cairo::Error> {
+    let dim = |n: i32| ((n as f64 * s).ceil() as i32).max(1);
+    let out = cairo::ImageSurface::create(cairo::Format::ARgb32, dim(base.width()), dim(base.height()))?;
+    let cr = cairo::Context::new(&out)?;
+    cr.scale(s, s);
+    cr.set_source_surface(base, 0.0, 0.0)?;
+    cr.paint()?;
+    drop(cr);
+    Ok(out)
 }
 
 /// Detaches the IM before committing so dead-key state can't leak into shortcuts.
@@ -137,6 +174,7 @@ pub fn open(app: &gtk4::Application, image: PathBuf, t0: Option<Instant>) {
         tool: prefs.tool,
         color: prefs.color,
         base,
+        scaled: None,
         editing: None,
         image,
     }));
@@ -182,9 +220,14 @@ pub fn open(app: &gtk4::Application, image: PathBuf, t0: Option<Instant>) {
             }
             cr.set_source_rgb(BACKGROUND, BACKGROUND, BACKGROUND);
             let _ = cr.paint();
-            cr.translate(e.view.ox, e.view.oy);
-            cr.scale(e.view.scale, e.view.scale);
-            if cr.set_source_surface(&e.base, 0.0, 0.0).is_ok() {
+            let View { scale, ox, oy } = e.view;
+            let cached = e.scaled_base().is_some_and(|img| {
+                cr.set_source_surface(img, ox, oy).is_ok() && cr.paint().is_ok()
+            });
+            // Shapes stay in image coords through the same transform.
+            cr.translate(ox, oy);
+            cr.scale(scale, scale);
+            if !cached && cr.set_source_surface(&e.base, 0.0, 0.0).is_ok() {
                 let _ = cr.paint();
             }
             for s in e.doc.shapes.iter().chain(e.draft.as_ref()).chain(e.editing.as_ref()) {
@@ -204,12 +247,15 @@ pub fn open(app: &gtk4::Application, image: PathBuf, t0: Option<Instant>) {
     im.set_client_widget(Some(&area));
     {
         let ed = ed.clone();
-        let area = area.clone();
+        // Weak: area -> drag handler -> im -> this handler -> area would be a cycle.
+        let area = area.downgrade();
         im.connect_commit(move |_, s| {
             if let Some(text) = ed.borrow_mut().text_mut() {
                 text.push_str(s);
             }
-            area.queue_draw();
+            if let Some(area) = area.upgrade() {
+                area.queue_draw();
+            }
         });
     }
     // Resize refits (in the draw func) as long as the user hasn't zoomed/panned.
@@ -262,10 +308,7 @@ pub fn open(app: &gtk4::Application, image: PathBuf, t0: Option<Instant>) {
         let area = area.clone();
         drag.connect_drag_end(move |g, dx, dy| {
             drag_to(g, dx, dy);
-            let mut e = ed.borrow_mut();
-            if let Some(s) = e.draft.take() {
-                e.doc.push(s); // degenerate (e.g. click without drag) is dropped here
-            }
+            ed.borrow_mut().commit_draft(); // degenerate (e.g. click without drag) is dropped
             area.queue_draw();
         });
     }
@@ -417,7 +460,7 @@ pub fn open(app: &gtk4::Application, image: PathBuf, t0: Option<Instant>) {
             }
             stop_editing(&ed, &keys, &im);
             let png = {
-                let e = ed.borrow();
+                let mut e = ed.borrow_mut();
                 let png = e.png(f);
                 if png.is_none() && matches!(f, Finish::Copy) {
                     // Export failed: keep the editor open so the user can retry or Esc.
@@ -433,6 +476,13 @@ pub fn open(app: &gtk4::Application, image: PathBuf, t0: Option<Instant>) {
             match png {
                 Some(png) => clipboard::hand_off(&app, &window, glib::Bytes::from_owned(png)),
                 None => window.destroy(),
+            }
+            // Lingering as clipboard owner must not keep the capture in memory.
+            let mut e = ed.borrow_mut();
+            e.scaled = None;
+            e.doc = Doc::default();
+            if let Ok(s) = cairo::ImageSurface::create(cairo::Format::ARgb32, 1, 1) {
+                e.base = s;
             }
         })
     };
@@ -463,8 +513,7 @@ pub fn open(app: &gtk4::Application, image: PathBuf, t0: Option<Instant>) {
     {
         let ed = ed.clone();
         let area = area.clone();
-        let keys_ = keys.clone();
-        keys.connect_key_pressed(move |_, key, _, mods| {
+        keys.connect_key_pressed(move |keys, key, _, mods| {
             let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
             let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
             let other = mods.intersects(gdk::ModifierType::ALT_MASK | gdk::ModifierType::SUPER_MASK);
@@ -473,7 +522,7 @@ pub fn open(app: &gtk4::Application, image: PathBuf, t0: Option<Instant>) {
             let editing = ed.borrow().editing.is_some();
             if key == gdk::Key::Escape && !ctrl && !other {
                 if editing {
-                    stop_editing(&ed, &keys_, &im);
+                    stop_editing(&ed, keys, &im);
                     area.queue_draw();
                 } else {
                     discard.emit_clicked();
@@ -551,6 +600,7 @@ mod tests {
             tool: Tool::Text,
             color: 0,
             base: cairo::ImageSurface::create(cairo::Format::ARgb32, 4, 4).unwrap(),
+            scaled: None,
             editing: Some(Shape::Text { at: Point { x: 0.0, y: 0.0 }, text: String::new(), color: PALETTE[0] }),
             image: PathBuf::from("/nonexistent/printmark-clean.png"),
         }
@@ -580,6 +630,45 @@ mod tests {
         let copy = e.png(Finish::Copy);
         std::fs::remove_file(&e.image).unwrap();
         assert!(copy.is_none());
+    }
+
+    #[test]
+    fn copy_includes_draft_still_being_dragged() {
+        let mut e = editor();
+        {
+            let cr = cairo::Context::new(&e.base).unwrap();
+            cr.set_source_rgb(1.0, 1.0, 1.0);
+            cr.paint().unwrap();
+        }
+        // Ctrl+C before releasing the mouse: the tarja on screen is only a draft.
+        e.draft = Some(Shape::Redact { a: Point { x: 0.0, y: 0.0 }, b: Point { x: 4.0, y: 4.0 } });
+        let png = e.png(Finish::Copy).unwrap();
+        let mut img = cairo::ImageSurface::create_from_png(&mut png.as_slice()).unwrap();
+        let stride = img.stride() as usize;
+        let data = img.data().unwrap();
+        for (x, y) in [(0, 0), (1, 2), (3, 3)] {
+            let px = &data[y * stride + x * 4..][..3];
+            assert_eq!(px, [0, 0, 0], "pixel ({x},{y}) not black");
+        }
+    }
+
+    #[test]
+    fn scaled_base_is_cached_per_scale() {
+        let mut e = editor();
+        let ptr = |e: &mut Editor| e.scaled_base().map(|s| (s.to_raw_none(), s.width(), s.height()));
+        assert!(ptr(&mut e).is_none()); // scale 1: paint base directly
+        e.view.scale = 0.5;
+        let a = ptr(&mut e).unwrap();
+        assert_eq!((a.1, a.2), (2, 2));
+        assert_eq!(ptr(&mut e).unwrap(), a); // same surface, not rebuilt
+        e.view.ox = 37.0; // pan does not rebuild
+        assert_eq!(ptr(&mut e).unwrap(), a);
+        e.view.scale = 0.25;
+        let b = ptr(&mut e).unwrap();
+        assert_ne!(b.0, a.0);
+        assert_eq!((b.1, b.2), (1, 1));
+        e.view.scale = 2.0;
+        assert!(ptr(&mut e).is_none() && e.scaled.is_none());
     }
 
     #[test]
