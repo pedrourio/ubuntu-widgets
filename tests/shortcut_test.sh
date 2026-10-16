@@ -13,14 +13,17 @@ eq() { [ "$2" = "$3" ] || { echo "FAIL $1: got [$2], want [$3]"; exit 1; }; }
 gsettings set $MK custom-keybindings "['$C0', '$C1']"
 eq seed-print "$(gsettings get org.gnome.shell.keybindings show-screenshot-ui)" "['Print']"
 
-"$here/../scripts/shortcut.sh" enable /x/printmark
-"$here/../scripts/shortcut.sh" enable /x/printmark
+bindir=$(mktemp -d)
+touch "$bindir/printmark"
+"$here/../scripts/shortcut.sh" enable "$bindir/printmark"
+# Second run (idempotent) with a relative path, which must be stored absolute.
+(cd "$bindir" && "$here/../scripts/shortcut.sh" enable ./printmark)
 
 eq list "$(gsettings get $MK custom-keybindings)" "['$C0', '$C1', '$PM']"
 eq screenshot-ui "$(gsettings get org.gnome.shell.keybindings show-screenshot-ui)" "@as []"
 S=$MK.custom-keybinding:$PM
 eq binding "$(gsettings get $S binding)" "'Print'"
-eq command "$(gsettings get $S command)" "'/x/printmark'"
+eq command "$(gsettings get $S command)" "'$(realpath "$bindir/printmark")'"
 eq name "$(gsettings get $S name)" "'printmark'"
 
 "$here/../scripts/shortcut.sh" disable

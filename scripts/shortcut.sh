@@ -27,7 +27,8 @@ PY
 
 case "${1:-}" in
   enable)
-    bin=${2:?usage: shortcut.sh enable <binary-path>}
+    # Absolute: GNOME runs the command from its own cwd.
+    bin=$(realpath "${2:?usage: shortcut.sh enable <binary-path>}")
     if [ ! -e "$BAK" ]; then
       mkdir -p "$(dirname "$BAK")"
       gsettings get $SS_SCHEMA $SS_KEY > "$BAK"
