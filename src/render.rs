@@ -128,6 +128,8 @@ pub fn export_png(base: &ImageSurface, shapes: &[Shape]) -> Result<Vec<u8>, cair
         for s in shapes {
             draw_shape(&cr, s);
         }
+        // draw_shape swallows errors; a sticky context error would skip shapes (even a Redact) silently.
+        cr.status()?;
     }
     let mut buf = Vec::new();
     out.write_to_png(&mut buf).map_err(|e| match e {
@@ -196,5 +198,11 @@ mod tests {
         let single = px(&png, 20, 20);
         assert_ne!(single, [255, 255, 255, 255]);
         assert_eq!(px(&png, 30, 30), single);
+    }
+
+    #[test]
+    fn export_fails_on_context_error() {
+        let shapes = [Shape::Ellipse { a: p(f64::NAN, 0.0), b: p(10.0, 10.0), color: PALETTE[0] }];
+        assert!(export_png(&white(64, 64), &shapes).is_err());
     }
 }
