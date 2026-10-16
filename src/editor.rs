@@ -88,14 +88,13 @@ impl Editor {
         }
     }
 
-    /// PNG bytes for the clipboard. A failed export falls back to the clean image,
-    /// so the clipboard is never left empty.
+    /// PNG bytes for the clipboard. Copy never falls back to the clean image: a
+    /// tarja must not leak, so a failed export yields None (the editor stays open).
     fn png(&self, f: Finish) -> Option<Vec<u8>> {
         if let Finish::Copy = f {
-            match render::export_png(&self.base, &self.doc.shapes) {
-                Ok(png) => return Some(png),
-                Err(e) => eprintln!("printmark: export failed, copying the clean image: {e}"),
-            }
+            return render::export_png(&self.base, &self.doc.shapes)
+                .inspect_err(|e| eprintln!("printmark: export failed, nothing copied: {e}"))
+                .ok();
         }
         std::fs::read(&self.image)
             .inspect_err(|e| eprintln!("printmark: {}: {e}", self.image.display()))
@@ -419,10 +418,17 @@ pub fn open(app: &gtk4::Application, image: PathBuf, t0: Option<Instant>) {
             stop_editing(&ed, &keys, &im);
             let png = {
                 let e = ed.borrow();
+                let png = e.png(f);
+                if png.is_none() && matches!(f, Finish::Copy) {
+                    // Export failed: keep the editor open so the user can retry or Esc.
+                    drop(e);
+                    done.set(false);
+                    return;
+                }
                 if let Err(err) = state::save(&state::path(), state::Prefs { tool: e.tool, color: e.color }) {
                     eprintln!("printmark: saving state: {err}");
                 }
-                e.png(f)
+                png
             };
             match png {
                 Some(png) => clipboard::hand_off(&app, &window, glib::Bytes::from_owned(png)),
@@ -561,6 +567,19 @@ mod tests {
         std::fs::remove_file(&e.image).unwrap();
         // Clean file gone: Descartar still yields the clean image, never nothing.
         assert!(e.png(Finish::Discard).unwrap().starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    fn failed_copy_export_never_yields_clean_bytes() {
+        let mut e = editor();
+        e.image = std::env::temp_dir().join(format!("printmark-{}-clean-fail.png", std::process::id()));
+        std::fs::write(&e.image, b"clean bytes").unwrap();
+        // NaN puts the cairo context in an error state, so export_png fails
+        // (pushed directly: Doc::push would drop it as degenerate).
+        e.doc.shapes.push(Shape::Ellipse { a: Point { x: f64::NAN, y: 0.0 }, b: Point { x: 3.0, y: 3.0 }, color: PALETTE[0] });
+        let copy = e.png(Finish::Copy);
+        std::fs::remove_file(&e.image).unwrap();
+        assert!(copy.is_none());
     }
 
     #[test]
