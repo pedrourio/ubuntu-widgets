@@ -1,0 +1,20 @@
+/* barra do topo */
+.jw-pill { spacing: 6px; }
+.jw-sprint { font-weight: bold; }
+.jw-kda { spacing: 3px; }
+.jw-lz { padding: 0 5px; border-radius: 3px; font-size: 0.8em; font-weight: bold; min-width: 10px; text-align: center; }
+.jw-todo { color: #fea362; border: 1.5px solid #fea362; padding: 0 4px; }
+.jw-progress { background-color: #09326c; color: #85b8ff; }
+.jw-review { background-color: #352c63; color: #b8acf6; }
+.jw-ready { background-color: #533f04; color: #f8e6a0; }
+.jw-testing { background-color: #1d474c; color: #9dd9ee; }
+.jw-deploy { background-color: #50253f; color: #fdd0ec; }
+.jw-done { background-color: #164b35; color: #7ee2b8; }
+.jw-stale .jw-kda, .jw-stale .jw-sprint { opacity: 0.55; }
+
+/* menu: padrão Jira (Atlassian dark) */
+.jw-menu { background-color: #282e33; border: 1px solid #38414a; color: #b6c2cf; }
+.jw-item { padding: 0; }
+.jw-item:hover, .jw-item:focus { background-color: transparent; }
+.jw-content { width: 600px; spacing: 12px; padding: 8px 6px; }
+.jw-title { font-weight: 600; font-size: 1.2em; color: #dee4ea; }

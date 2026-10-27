@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- só preenchimento: o GNOME recolore ícones symbolic pelo fill -->
+  <path fill="#2e3436" fill-rule="evenodd" d="M8 .6 15.4 8 8 15.4.6 8zm0 4.6L5.2 8 8 10.8 10.8 8z"/>
+</svg>
