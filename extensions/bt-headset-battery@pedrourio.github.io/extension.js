@@ -1,3 +1,4 @@
+import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import St from 'gi://St';
@@ -10,7 +11,9 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 const BAR_WIDTH = 28;
 const AUDIO_KINDS = [UPowerGlib.DeviceKind.HEADSET, UPowerGlib.DeviceKind.HEADPHONES];
 
-const Indicator = GObject.registerClass(
+// Nome do tipo derivado do caminho do arquivo: o ext-reload carrega cópias em caminhos novos
+// e o GObject não aceita registrar o mesmo nome duas vezes.
+const Indicator = GObject.registerClass({GTypeName: `BtIndicator_${GLib.compute_checksum_for_string(GLib.ChecksumType.MD5, import.meta.url, -1)}`},
 class Indicator extends PanelMenu.Button {
     _init(dir) {
         super._init(0.5, 'Bluetooth Headset Battery', true);

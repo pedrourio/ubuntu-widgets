@@ -34,7 +34,9 @@ const iconButton = (icon_name, accessible_name, onClick) => {
     return btn;
 };
 
-const Indicator = GObject.registerClass(
+// Nome do tipo derivado do caminho do arquivo: o ext-reload carrega cópias em caminhos novos
+// e o GObject não aceita registrar o mesmo nome duas vezes.
+const Indicator = GObject.registerClass({GTypeName: `PrwIndicator_${GLib.compute_checksum_for_string(GLib.ChecksumType.MD5, import.meta.url, -1)}`},
 class Indicator extends PanelMenu.Button {
     _init(ext) {
         super._init(0.0, 'PRs abertas', false);

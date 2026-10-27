@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Recarrega extensões GNOME com o código atual, sem logout. Sem argumentos: todas as deste repo.
+# Precisa da extensão ext-reload ativa (uma vez só: ext-hotload ext-reload@pedrourio.github.io).
+set -euo pipefail
+repo=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+self=ext-reload@pedrourio.github.io
+if (( $# )); then uuids=("$@"); else
+  uuids=(); for d in "$repo"/extensions/*/; do u=$(basename "$d"); [[ $u == "$self" ]] || uuids+=("$u"); done
+fi
+for uuid in "${uuids[@]}"; do
+  out=$(gdbus call --session --dest org.gnome.Shell --object-path /io/github/pedrourio/ExtReload \
+    --method io.github.pedrourio.ExtReload.Reload "$uuid" 2>&1) || {
+    if [[ $out == *UnknownMethod* || $out == *"No such interface"* || $out == *UnknownObject* ]]; then
+      echo "ext-reload não está ativa. Uma vez só: ext-hotload $self" >&2; exit 1
+    fi
+    echo "$uuid: ${out#*: }" >&2; continue; }
+  echo "$uuid: $(sed -E "s/^\('(.*)',\)$/\1/" <<<"$out")"
+done

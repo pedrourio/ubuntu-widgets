@@ -6,4 +6,5 @@
 - Mudou regra, visualização, flag ou opção no widget? No mesmo commit: ajuste `bin/pr-status.js` se a saída ou as opções mudarem, `claude-skills/pr-status/SKILL.md` se o jeito de usar ou ler mudar, e o `README.md`.
 - Antes de commitar: `cd extensions/pr-widget@pedrourio.github.io && gjs -m check.js` e `bin/pr-status` (precisa rodar sem erro).
 - Nada de nomes internos de empresa no código (reviewer, org, prefixo de repo): ficam em `~/.config/pr-widget/config.json`.
-- Extensão já carregada só pega código novo após logout; o `ext-hotload` serve apenas na primeira carga de cada uuid.
+- Depois de mudar qualquer extensão, rode `bin/ext-reload` (todas) ou `ext-reload <uuid>`: recarrega sem logout e mostra o estado (ACTIVE ou o erro). Só o próprio `ext-reload@…` precisa de logout.
+- Toda classe com `GObject.registerClass` numa extensão precisa de `GTypeName` derivado de `import.meta.url` (ver pr-widget), senão a recarga falha com "Type name … is already registered".

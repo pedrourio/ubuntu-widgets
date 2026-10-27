@@ -11,10 +11,21 @@ Extensões pequenas para a barra do topo do GNOME Shell 50 (Wayland), feitas par
 ## Instalar
 
 ```sh
-./install.sh          # liga as extensões, ext-hotload, pr-status e a skill por symlink
+./install.sh          # liga as extensões, ext-hotload, ext-reload, pr-status e a skill por symlink
 ```
 
-As extensões carregam no próximo login. Para carregar já, sem sair da conta: rode o `ext-hotload <uuid>...` que o `install.sh` mostra no final, depois `Alt+F2` → `lg` → `Ctrl+V` → `Enter`. Isso só vale na primeira carga de cada extensão; código alterado depois exige logout.
+As extensões carregam no próximo login. Para carregar já, sem sair da conta: rode o `ext-hotload <uuid>...` que o `install.sh` mostra no final, depois `Alt+F2` → `lg` → `Ctrl+V` → `Enter`. Isso só vale na primeira carga de cada extensão.
+
+### Recarregar sem logout: `ext-reload`
+
+Ative uma vez a extensão `ext-reload@pedrourio.github.io` (`ext-hotload ext-reload@pedrourio.github.io`). Daí em diante, depois de mudar o código:
+
+```sh
+ext-reload                                  # todas as extensões do repo
+ext-reload pr-widget@pedrourio.github.io    # só uma
+```
+
+O GNOME guarda os módulos já importados pelo caminho do arquivo e só barra a recarga por versão. O `ext-reload` copia a extensão para `~/.cache/ext-reload/<uuid>/<carimbo>/<uuid>`, descarrega a antiga e carrega a cópia (mesmo uuid e versão, caminho novo). Classes `GObject.registerClass` precisam de `GTypeName` derivado de `import.meta.url` para não colidir. O próprio `ext-reload` só muda com logout.
 
 ## pr-widget
 

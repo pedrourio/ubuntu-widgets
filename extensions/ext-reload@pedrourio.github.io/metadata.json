@@ -1,0 +1,7 @@
+{
+  "uuid": "ext-reload@pedrourio.github.io",
+  "name": "Ext Reload",
+  "description": "Recarrega extensões do usuário sem logout (bin/ext-reload).",
+  "shell-version": ["50"],
+  "url": "https://github.com/pedrourio/ubuntu-widgets"
+}
