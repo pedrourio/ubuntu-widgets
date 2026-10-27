@@ -1,0 +1,6 @@
+{
+  "uuid": "bt-headset-battery@pedrourio.github.io",
+  "name": "Bluetooth Headset Battery",
+  "description": "Ícone do fone conectado com barra e porcentagem de bateria na barra do topo.",
+  "shell-version": ["50"]
+}

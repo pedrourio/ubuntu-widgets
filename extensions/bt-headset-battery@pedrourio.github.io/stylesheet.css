@@ -1,0 +1,6 @@
+.bthb-box { spacing: 5px; }
+.bthb-bar { height: 7px; border-radius: 4px; background-color: rgba(255, 255, 255, 0.25); }
+.bthb-fill { height: 7px; border-radius: 4px; background-color: #57e389; }
+.bthb-fill.mid { background-color: #f6d32d; }
+.bthb-fill.low { background-color: #ed333b; }
+.bthb-label { font-size: 0.9em; }

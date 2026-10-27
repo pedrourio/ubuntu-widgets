@@ -1,0 +1,338 @@
+import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
+import GObject from 'gi://GObject';
+import St from 'gi://St';
+import Clutter from 'gi://Clutter';
+import Pango from 'gi://Pango';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {buildQuery, classify, groupPrs, counts, parsePrRef, relTime} from './logic.js';
+import {loadConfig, saveConfig, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
+
+const COUNTERS = ['reply', 'waiting', 'ready', 'conflict'];
+const STATUS = {
+    pass: ['PASS', 'object-select-symbolic'],
+    approved: ['Aprovada', 'object-select-symbolic'],
+    warn: ['WARN', 'dialog-warning-symbolic'],
+    changes: ['Mudanças pedidas', 'window-close-symbolic'],
+    none: ['Sem review', null],
+};
+
+const label = (text, style_class = '', props = {}) =>
+    new St.Label({text, style_class, y_align: Clutter.ActorAlign.CENTER, ...props});
+
+const iconButton = (icon_name, accessible_name, onClick) => {
+    const btn = new St.Button({style_class: 'prw-btn', child: new St.Icon({icon_name, icon_size: 16}), accessible_name, can_focus: true});
+    btn.connect('clicked', onClick);
+    return btn;
+};
+
+const Indicator = GObject.registerClass(
+class Indicator extends PanelMenu.Button {
+    _init(ext) {
+        super._init(0.0, 'PRs abertas', false);
+        this._ext = ext;
+        this._items = [];
+        this._prev = new Map();
+        this._collapsed = new Set(['ready', 'nogroup']);
+        this._error = null;
+        this._updatedAt = null;
+
+        const box = new St.BoxLayout({style_class: 'prw-pill'});
+        box.add_child(new St.Icon({gicon: Gio.icon_new_for_string(`${ext.path}/pr-symbolic.svg`), style_class: 'system-status-icon'}));
+        this._total = label('…', 'prw-total');
+        box.add_child(this._total);
+        this._badges = {};
+        for (const k of COUNTERS) {
+            this._badges[k] = label('', `prw-badge prw-${k}`, {visible: false});
+            box.add_child(this._badges[k]);
+        }
+        this.add_child(box);
+
+        this.menu.box.add_style_class_name('prw-menu');
+        // PopupMenu vazio não abre: o conteúdo precisa existir antes do primeiro clique.
+        this._cfg = loadConfig();
+        this._render();
+        this.menu.connect('open-state-changed', (_m, open) => {
+            if (open)
+                this._syncUpdated();
+        });
+
+        this._monitor = Gio.File.new_for_path(CONFIG_PATH).monitor_file(Gio.FileMonitorFlags.NONE, null);
+        this._monitor.connect('changed', (_m, _f, _o, event) => {
+            if (event !== Gio.FileMonitorEvent.CHANGES_DONE_HINT && event !== Gio.FileMonitorEvent.CREATED)
+                return;
+            this._cfg = loadConfig();
+            this.refresh();
+        });
+
+        this.refresh();
+        this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, this._cfg.intervalMinutes * 60, () => {
+            this.refresh();
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    refresh() {
+        if (this._busy)
+            return;
+        const gh = GLib.find_program_in_path('gh');
+        if (!gh) {
+            this._fail('gh não encontrado no PATH');
+            return;
+        }
+        this._busy = true;
+        try {
+            const proc = Gio.Subprocess.new(
+                [gh, 'api', 'graphql', '-f', `query=${buildQuery(this._cfg.extra)}`],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+            proc.communicate_utf8_async(null, null, (p, res) => {
+                if (this._destroyed)
+                    return;
+                this._busy = false;
+                try {
+                    const [, out, err] = p.communicate_utf8_finish(res);
+                    let json = null;
+                    try {
+                        json = JSON.parse(out);
+                    } catch {}
+                    // Com erro parcial (ex.: PR monitorada que não existe) o gh sai != 0 mas traz data.
+                    if (!json?.data?.search)
+                        throw new Error(err.trim().split('\n').pop() || 'gh falhou');
+                    this._apply(json.data, json.errors?.[0]?.message ?? null);
+                } catch (e) {
+                    this._fail(e.message);
+                }
+            });
+        } catch (e) {
+            this._busy = false;
+            this._fail(e.message);
+        }
+    }
+
+    _apply(data, partialError) {
+        const ctx = {me: data.viewer.login, reviewer: this._cfg.reviewer, repoPrefix: this._cfg.repoPrefix};
+        const extraNodes = Object.keys(data).filter(k => /^x\d+$/.test(k)).map(k => data[k]?.pullRequest);
+        const seen = new Set();
+        this._items = [...data.search.nodes, ...extraNodes]
+            .filter(n => n?.number && !seen.has(n.url) && seen.add(n.url))
+            .map(n => {
+                const c = classify(n, ctx, this._prev.get(n.url));
+                this._prev.set(n.url, c);
+                return c;
+            });
+        this._error = partialError;
+        this._updatedAt = Date.now();
+        writeJson(CACHE_PATH, this._items.map(p => ({key: p.key, title: p.title})));
+        this._updatePill();
+        this._render();
+    }
+
+    _fail(message) {
+        this._busy = false;
+        this._error = message;
+        this._updatePill();
+        this._render();
+    }
+
+    _updatePill() {
+        const c = counts(this._items);
+        const failed = this._error && !this._updatedAt;
+        this._total.text = failed ? '!' : String(c.total);
+        this._total.style_class = failed ? 'prw-total prw-error' : 'prw-total';
+        for (const k of COUNTERS) {
+            this._badges[k].text = String(c[k]);
+            this._badges[k].visible = !failed && c[k] > 0;
+        }
+    }
+
+    _render() {
+        this.menu.removeAll();
+        const content = new St.BoxLayout({vertical: true, style_class: 'prw-content'});
+        const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false, style_class: 'prw-item'});
+        item.add_child(content);
+        this.menu.addMenuItem(item);
+
+        const header = new St.BoxLayout({style_class: 'prw-header'});
+        header.add_child(label('Minhas PRs abertas', 'prw-title', {x_expand: true}));
+        this._updatedLabel = label('', 'prw-muted');
+        this._syncUpdated();
+        header.add_child(this._updatedLabel);
+        header.add_child(iconButton('view-refresh-symbolic', 'Atualizar agora', () => this.refresh()));
+        content.add_child(header);
+
+        if (this._error)
+            content.add_child(label(`Erro ao consultar o GitHub: ${this._error}`, 'prw-errortext'));
+
+        const c = counts(this._items);
+        const chips = new St.BoxLayout({style_class: 'prw-chips'});
+        for (const [k, text] of [['reply', 'pedem sua resposta'], ['waiting', `aguardando ${this._cfg.reviewerName}`], ['ready', 'prontas para merge'], ['conflict', 'com conflito'], ['noReview', 'sem review']]) {
+            if (c[k])
+                chips.add_child(label(`${c[k]} ${text}`, `prw-chip prw-chip-${k}`));
+        }
+        content.add_child(chips);
+
+        const list = new St.BoxLayout({vertical: true, style_class: 'prw-list'});
+        const extraKeys = new Set(this._cfg.extra);
+        for (const g of groupPrs(this._items, this._cfg, extraKeys))
+            list.add_child(this._group(g));
+        const scroll = new St.ScrollView({style_class: 'prw-scroll', hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC});
+        scroll.set_child(list);
+        content.add_child(scroll);
+
+        content.add_child(this._footer());
+    }
+
+    _syncUpdated() {
+        this._updatedLabel.text = this._updatedAt
+            ? `Atualizado ${relTime(new Date(this._updatedAt).toISOString())}`
+            : 'Atualizando…';
+    }
+
+    _group(g) {
+        const box = new St.BoxLayout({vertical: true, style_class: 'prw-group'});
+        const head = new St.BoxLayout({style_class: 'prw-group-header'});
+        head.add_child(new St.Widget({style_class: 'prw-dot', style: `background-color: ${g.color};`, y_align: Clutter.ActorAlign.CENTER}));
+        head.add_child(label(g.name, 'prw-group-name', {x_expand: true}));
+        const conflicts = g.prs.filter(p => p.conflict).length;
+        const note = g.note ?? (conflicts ? `${conflicts} com conflito` : '');
+        if (note)
+            head.add_child(label(note, 'prw-muted'));
+        head.add_child(label(String(g.prs.length), 'prw-count', {accessible_name: `${g.prs.length} PRs`}));
+        const rows = new St.BoxLayout({vertical: true, visible: !this._collapsed.has(g.id)});
+        const toggle = iconButton(rows.visible ? 'pan-down-symbolic' : 'pan-end-symbolic', `Recolher ou expandir ${g.name}`, () => {
+            rows.visible = !rows.visible;
+            if (rows.visible)
+                this._collapsed.delete(g.id);
+            else
+                this._collapsed.add(g.id);
+            toggle.child.icon_name = rows.visible ? 'pan-down-symbolic' : 'pan-end-symbolic';
+        });
+        toggle.add_style_class_name('prw-flat');
+        head.add_child(toggle);
+        box.add_child(head);
+        for (const p of g.prs)
+            rows.add_child(this._row(p));
+        box.add_child(rows);
+        return box;
+    }
+
+    _row(p) {
+        const row = new St.BoxLayout({style_class: p.needsReply ? 'prw-row prw-row-reply' : 'prw-row'});
+        const body = new St.BoxLayout({vertical: true, x_expand: true, style_class: 'prw-row-body'});
+
+        const top = new St.BoxLayout({style_class: 'prw-line'});
+        top.add_child(label(p.repo, 'prw-repo'));
+        top.add_child(label(`#${p.num}`, 'prw-muted'));
+        body.add_child(top);
+
+        const title = label(p.title, 'prw-pr-title', {x_expand: true});
+        title.clutter_text.line_wrap = true;
+        title.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+        title.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        body.add_child(title);
+
+        const meta = new St.BoxLayout({style_class: 'prw-line'});
+        const [statusText, statusIcon] = STATUS[p.status];
+        const badge = new St.BoxLayout({style_class: `prw-status prw-status-${p.status}`});
+        if (statusIcon)
+            badge.add_child(new St.Icon({icon_name: statusIcon, icon_size: 12, y_align: Clutter.ActorAlign.CENTER}));
+        badge.add_child(label(statusText));
+        meta.add_child(badge);
+        const who = this._cfg.reviewerName;
+        meta.add_child(label(p.reviews === 0 ? `Nenhum review do ${who}` : p.reviews === 1 ? `1 review do ${who}` : `${p.reviews} reviews do ${who}`, 'prw-muted'));
+        body.add_child(meta);
+
+        const flags = new St.BoxLayout({style_class: 'prw-line'});
+        if (p.needsReply)
+            flags.add_child(label(`Sem resposta sua · ${relTime(p.since)}`, 'prw-flag prw-flag-reply'));
+        if (p.waitingBot)
+            flags.add_child(label(`Aguardando ${who} · você respondeu ${relTime(p.since)}`, 'prw-flag prw-flag-waiting'));
+        if (p.ready)
+            flags.add_child(label('Pronta para merge', 'prw-flag prw-flag-ready'));
+        if (p.conflict)
+            flags.add_child(label(`Com conflito com ${p.base}`, 'prw-flag prw-flag-conflict'));
+        if (flags.get_n_children())
+            body.add_child(flags);
+        row.add_child(body);
+
+        const actions = new St.BoxLayout({style_class: 'prw-actions', y_align: Clutter.ActorAlign.START});
+        actions.add_child(iconButton('web-browser-symbolic', `Abrir PR ${p.num} no navegador`, () => {
+            Gio.AppInfo.launch_default_for_uri(p.url, null);
+            this.menu.close();
+        }));
+        const copy = iconButton('edit-copy-symbolic', `Copiar link da PR ${p.num}`, () => {
+            St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, p.url);
+            copy.child.icon_name = 'object-select-symbolic';
+            copy.add_style_class_name('prw-btn-done');
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1600, () => {
+                if (!this._destroyed && copy.get_stage()) {
+                    copy.child.icon_name = 'edit-copy-symbolic';
+                    copy.remove_style_class_name('prw-btn-done');
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+        });
+        actions.add_child(copy);
+        row.add_child(actions);
+        return row;
+    }
+
+    _footer() {
+        const box = new St.BoxLayout({vertical: true, style_class: 'prw-footer'});
+        box.add_child(label('Monitorar outra PR', 'prw-group-name'));
+        const line = new St.BoxLayout({style_class: 'prw-line'});
+        const entry = new St.Entry({hint_text: 'URL da PR ou repo#número', can_focus: true, x_expand: true, style_class: 'prw-entry'});
+        const error = label('Use a URL da PR ou org/repo#número (só repo#número se "defaultOwner" estiver configurado).', 'prw-errortext', {visible: false});
+        const add = () => {
+            const key = parsePrRef(entry.text, this._cfg.defaultOwner);
+            if (!key) {
+                error.visible = true;
+                return;
+            }
+            if (!this._cfg.extra.includes(key)) {
+                this._cfg.extra = [...this._cfg.extra, key];
+                saveConfig(this._cfg); // o monitor do arquivo dispara a atualização
+            }
+            entry.text = '';
+            error.visible = false;
+        };
+        entry.clutter_text.connect('activate', add);
+        const btn = new St.Button({label: 'Adicionar', style_class: 'prw-primary', can_focus: true});
+        btn.connect('clicked', add);
+        line.add_child(entry);
+        line.add_child(btn);
+        box.add_child(line);
+        box.add_child(error);
+        const org = new St.Button({label: 'Organizar grupos e cores', style_class: 'prw-link', x_align: Clutter.ActorAlign.START, can_focus: true});
+        org.connect('clicked', () => {
+            this.menu.close();
+            this._ext.openPreferences();
+        });
+        box.add_child(org);
+        return box;
+    }
+
+    destroy() {
+        this._destroyed = true;
+        if (this._timer)
+            GLib.source_remove(this._timer);
+        this._monitor?.cancel();
+        super.destroy();
+    }
+});
+
+export default class PrWidgetExtension extends Extension {
+    enable() {
+        this._indicator = new Indicator(this);
+        // depois do Spotify (1) e dos fones (2)
+        Main.panel.addToStatusArea(this.uuid, this._indicator, 3, 'left');
+    }
+
+    disable() {
+        this._indicator.destroy();
+        this._indicator = null;
+    }
+}

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Carrega extensões GNOME recém-instaladas sem encerrar a sessão (Wayland).
+# Copia a linha para o clipboard; cole no Looking Glass (Alt+F2 → lg → Enter).
+# Só funciona na primeira carga de cada uuid: código alterado depois exige logout.
+set -euo pipefail
+(( $# )) || { echo "uso: ext-hotload <uuid> [uuid...]" >&2; exit 1; }
+
+js="const m = Main.extensionManager;"
+for uuid in "$@"; do
+  dir="$HOME/.local/share/gnome-shell/extensions/$uuid"
+  [[ -f "$dir/metadata.json" ]] || { echo "extensão não encontrada: $dir" >&2; exit 1; }
+  if ! gsettings get org.gnome.shell enabled-extensions | grep -q "'$uuid'"; then
+    gsettings set org.gnome.shell enabled-extensions \
+      "$(gsettings get org.gnome.shell enabled-extensions | sed -E "s/^@as \[\]$/[]/; s/\]\$/, '$uuid']/; s/\[, /[/")"
+  fi
+  js+=" m.loadExtension(m.createExtensionObject('$uuid', Gio.File.new_for_path('$dir'), 2));"
+done
+
+printf '%s' "$js" | wl-copy
+echo "Copiado. Agora: Alt+F2 → digite lg → Enter → Ctrl+V → Enter → Esc"
