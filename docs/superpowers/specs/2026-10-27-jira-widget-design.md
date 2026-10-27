@@ -87,3 +87,4 @@ Prioridade absoluta: custo baixo. Nada roda em segundo plano além de uma checag
 - Token cadastrado pelas preferências da extensão (campo de senha) e salvo no chaveiro; sem token, o menu explica onde gerar e onde colar.
 - Para classificar PRs, o widget lê também o config do pr-widget (`~/.config/pr-widget/config.json`: reviewer, repoPrefix etc.), via o `config.js` dele no mesmo caminho estável do `logic.js`. Sem pr-widget instalado, as PRs aparecem só com repo, número e estado.
 - Card sem responsável mostra "Sem responsável"; card sem PR mostra "Nenhuma PR encontrada no GitHub".
+- **Pedido do usuário na aprovação:** botão de configuração (ícone de engrenagem) sempre visível no cabeçalho do menu, que abre as preferências da extensão já na seção do token (campo de senha com foco), com o link para gerar token da Atlassian ao lado. No estado "sem token", o mesmo atalho aparece como botão primário "Colar token".
