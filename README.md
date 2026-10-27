@@ -58,3 +58,31 @@ Regras testadas em `extensions/pr-widget@pedrourio.github.io/check.js`:
 ```sh
 cd extensions/pr-widget@pedrourio.github.io && gjs -m check.js
 ```
+
+## jira-widget
+
+Na barra, ao lado do pr-widget: ícone, número da sprint ativa (`S28`) e um placar estilo KDA com os **seus** cards da sprint por coluna do board — To Do (laranja vazado) / In Progress / Code Review / Ready to Test / Testing / Ready to Deploy / Done. As colunas são lidas do próprio board (pela posição), não fixadas no código.
+
+Ao abrir: sprint, dias restantes, busca e o burndown da sprint (o mesmo dado do relatório do Jira, em Story Points), com a linha ondulando de leve só enquanto o menu está aberto (respeita "animações" desligadas no GNOME). Buscar por `123`, `PROJ-123`, palavra do título ou nome do épico abre o card: responsável, PRs (achadas no GitHub pela chave no título, com as regras do pr-widget) e anexos como links.
+
+Custo: uma consulta pequena a cada `intervalMinutes` (padrão 15) para placar e burndown; abrir o menu não consulta nada; a busca espera 400 ms sem digitar e cancela a anterior; PRs só do card aberto.
+
+Config em `~/.config/jira-widget/config.json` (ou pela engrenagem do menu):
+
+| chave | o que é |
+|---|---|
+| `site` | `https://<org>.atlassian.net` |
+| `email` | email da conta Atlassian |
+| `boardId` | id do board scrum |
+| `project` | chave do projeto (`123` vira `PROJ-123`) |
+| `githubOwner` | organização no GitHub onde estão as PRs |
+| `pointsField` | campo de Story Points (`customfield_…`); vazio = estatística padrão do burndown |
+| `intervalMinutes` | intervalo do placar, padrão 15 |
+
+Token de API: gere em https://id.atlassian.com/manage-profile/security/api-tokens e cole nas preferências (engrenagem do menu) ou rode `jira-token`. Fica no chaveiro (libsecret), nunca em arquivo.
+
+O burndown usa o endpoint interno do relatório do Jira (`/rest/greenhopper/1.0/rapid/charts/scopechangeburndownchart`); se ele mudar, o bloco mostra "Burndown indisponível" e o resto segue.
+
+```sh
+cd extensions/jira-widget@pedrourio.github.io && gjs -m check.js   # regras
+```

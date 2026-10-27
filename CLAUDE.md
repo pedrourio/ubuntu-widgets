@@ -8,3 +8,9 @@
 - Nada de nomes internos de empresa no código (reviewer, org, prefixo de repo): ficam em `~/.config/pr-widget/config.json`.
 - Depois de mudar qualquer extensão, rode `bin/ext-reload` (todas) ou `ext-reload <uuid>`: recarrega sem logout e mostra o estado (ACTIVE ou o erro). Só o próprio `ext-reload@…` precisa de logout.
 - Toda classe com `GObject.registerClass` numa extensão precisa de `GTypeName` derivado de `import.meta.url` (ver pr-widget), senão a recarga falha com "Type name … is already registered".
+
+## jira-widget
+
+- Regras em `extensions/jira-widget@pedrourio.github.io/logic.js`, testadas por `gjs -m check.js` na mesma pasta. Desenho do burndown em `draw.js` (sem St) para dar para gerar PNG fora do shell.
+- O jira-widget importa `logic.js` e `config.js` do pr-widget pelo caminho instalado (`~/.local/share/gnome-shell/extensions/pr-widget@…`) para classificar PRs. Mudou o `FRAGMENT` ou o `classify`? Rode o `check.js` das duas extensões.
+- Nada de site, org, projeto ou board no código: só em `~/.config/jira-widget/config.json`. Token só no chaveiro.
