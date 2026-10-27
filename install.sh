@@ -8,7 +8,7 @@ for ext in "$repo"/extensions/*/; do
   ln -sfn "${ext%/}" "$dest/$(basename "$ext")"
   echo "ligado: $(basename "$ext")"
 done
-for bin in ext-hotload ext-reload pr-status; do
+for bin in ext-hotload ext-reload pr-status jira-token; do
   ln -sfn "$repo/bin/$bin" "$HOME/.local/bin/$bin"
 done
 # skills do Claude Code: o mesmo repo, para andarem junto com o widget

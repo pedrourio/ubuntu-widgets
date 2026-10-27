@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Guarda o token de API do Jira no chaveiro (o mesmo que o jira-widget lê). O token não aparece na tela.
+set -euo pipefail
+echo "Gere em https://id.atlassian.com/manage-profile/security/api-tokens"
+read -rsp "Cole o token e Enter: " token; echo
+[[ -n $token ]] || { echo "vazio, nada salvo" >&2; exit 1; }
+JIRA_TOKEN=$token exec gjs -m "$(dirname "$(readlink -f "$0")")/jira-token.js"
