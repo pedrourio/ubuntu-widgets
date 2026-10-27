@@ -3,16 +3,43 @@ import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
+import Pango from 'gi://Pango';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
-import {COLUMNS, columnMap, tally, pickActiveSprint, burndownSeries} from './logic.js';
+import {COLUMNS, columnMap, tally, pickActiveSprint, burndownSeries, daysLeft, toJql, epicJql, attachmentUrl, initials} from './logic.js';
 import {loadConfig, readJson, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 import {lookupToken} from './secret.js';
 import {JiraClient} from './jira.js';
 
 const DAY = 86400e3;
+const FIELDS = 'summary,status,assignee,parent,issuetype,attachment';
+const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const ERRORS = {
+    config: `Preencha site, email e board em ${CONFIG_PATH}.`,
+    notoken: 'Cole seu token do Jira para começar.',
+    auth: 'Token inválido ou expirado.',
+    net: 'Sem conexão com o Jira. Mostrando o último placar.',
+};
+
+const day = iso => {
+    const d = new Date(iso);
+    return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+};
+
+const wrap = l => {
+    l.clutter_text.line_wrap = true;
+    l.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+    l.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+    return l;
+};
+
+const button = (text, style_class, onClick, props = {}) => {
+    const b = new St.Button({label: text, style_class, can_focus: true, ...props});
+    b.connect('clicked', onClick);
+    return b;
+};
 
 const label = (text, style_class = '', props = {}) =>
     new St.Label({text, style_class, y_align: Clutter.ActorAlign.CENTER, ...props});
@@ -45,6 +72,17 @@ class Indicator extends PanelMenu.Button {
 
         this.menu.box.add_style_class_name('jw-menu');
         this._render();
+        this.menu.connect('open-state-changed', (_m, open) => {
+            // aberto não refaz o conteúdo (apagaria o que está sendo digitado)
+            if (open && this._dirty)
+                this._render();
+            if (open) {
+                this._search.grab_key_focus();
+            } else {
+                this._search.text = '';
+                this._searchCancel?.cancel();
+            }
+        });
 
         this._monitor = Gio.File.new_for_path(CONFIG_PATH).monitor_file(Gio.FileMonitorFlags.NONE, null);
         this._monitor.connect('changed', (_m, _f, _o, event) => {
@@ -177,8 +215,209 @@ class Indicator extends PanelMenu.Button {
         const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false, style_class: 'jw-item'});
         item.add_child(content);
         this.menu.addMenuItem(item);
-        content.add_child(label(this._state.sprint?.name ?? 'Nenhuma sprint ativa', 'jw-title'));
+        const {sprint, error} = this._state;
+
+        const header = new St.BoxLayout({style_class: 'jw-header'});
+        header.add_child(label(sprint?.name ?? 'Nenhuma sprint ativa', 'jw-title'));
+        if (sprint) {
+            header.add_child(label('ATIVA', 'jw-tag jw-tag-blue'));
+            const left = daysLeft(sprint.endDate);
+            header.add_child(label(`${day(sprint.startDate)} – ${day(sprint.endDate)} · ${left === 1 ? '1 dia restante' : `${left} dias restantes`}`,
+                'jw-muted', {x_expand: true, x_align: Clutter.ActorAlign.END}));
+        } else {
+            header.add_child(new St.Widget({x_expand: true}));
+        }
+        const gear = new St.Button({style_class: 'jw-icon-btn', child: new St.Icon({icon_name: 'emblem-system-symbolic', icon_size: 16}),
+            accessible_name: 'Configurar Jira', can_focus: true});
+        gear.connect('clicked', () => this._openPrefs());
+        header.add_child(gear);
+        content.add_child(header);
+
+        if (error) {
+            const box = new St.BoxLayout({vertical: true, style_class: 'jw-notice'});
+            box.add_child(wrap(label(ERRORS[error], 'jw-notice-text')));
+            if (error === 'notoken' || error === 'auth')
+                box.add_child(button('Colar token', 'jw-primary', () => this._openPrefs(), {x_align: Clutter.ActorAlign.START}));
+            content.add_child(box);
+        }
+
+        const field = new St.BoxLayout({style_class: 'jw-search-box'});
+        field.add_child(new St.Icon({icon_name: 'edit-find-symbolic', icon_size: 16, style_class: 'jw-muted', y_align: Clutter.ActorAlign.CENTER}));
+        this._search = new St.Entry({hint_text: `Pesquisar por ${this._cfg.project || 'PROJ'}-123, título ou épico`, can_focus: true, x_expand: true, style_class: 'jw-search'});
+        this._search.clutter_text.connect('text-changed', () => this._queueSearch());
+        field.add_child(this._search);
+        content.add_child(field);
+
+        this._burndownBox = new St.BoxLayout({vertical: true, style_class: 'jw-block'});
+        this._burndownBox.add_child(label('Gráfico de burndown', 'jw-block-title'));
+        content.add_child(this._burndownBox);
+
+        this._status = label('', 'jw-muted', {visible: false});
+        content.add_child(this._status);
+        this._results = new St.BoxLayout({vertical: true, style_class: 'jw-results'});
+        const scroll = new St.ScrollView({style_class: 'jw-scroll', hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC});
+        scroll.set_child(this._results);
+        content.add_child(scroll);
     }
+
+    _openPrefs() {
+        this.menu.close();
+        this._ext.openPreferences();
+    }
+
+    // Espera parar de digitar; cancela a busca anterior em andamento.
+    _queueSearch() {
+        if (this._searchTimer)
+            GLib.source_remove(this._searchTimer);
+        const q = this._search.text;
+        const empty = !q.trim();
+        this._burndownBox.visible = empty;
+        if (empty) {
+            this._searchCancel?.cancel();
+            this._results.destroy_all_children();
+            this._status.visible = false;
+            return;
+        }
+        this._searchTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 400, () => {
+            this._searchTimer = null;
+            this._runSearch(q);
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    async _runSearch(q) {
+        this._searchCancel?.cancel();
+        const cancel = this._searchCancel = new Gio.Cancellable();
+        this._showStatus('Pesquisando…');
+        try {
+            if (!await this._getClient())
+                throw Object.assign(new Error('token'), {kind: 'notoken'});
+            const project = this._cfg.project;
+            let jq = toJql(q, project);
+            if (!jq.byKey) {
+                const epics = await this._client.request('/rest/api/3/search/jql', {jql: epicJql(q, project), fields: 'summary', maxResults: 10}, cancel);
+                jq = toJql(q, project, epics.issues.map(i => i.key));
+            }
+            const r = await this._client.request('/rest/api/3/search/jql', {jql: jq.jql, fields: FIELDS, maxResults: 10}, cancel);
+            if (cancel.is_cancelled())
+                return;
+            this._results.destroy_all_children();
+            this._rows = r.issues.map(issue => ({issue, box: new St.BoxLayout({vertical: true, style_class: 'jw-result'})}));
+            for (const row of this._rows)
+                this._results.add_child(row.box);
+            this._rows.forEach((row, i) => this._fillRow(row, i === 0));
+            this._showStatus(r.issues.length ? '' : 'Nenhum card encontrado.');
+        } catch (e) {
+            if (cancel.is_cancelled() || this._destroyed)
+                return;
+            // busca por chave inexistente volta 400 no Jira: é "não achei", não erro
+            if (e.status === 400 && toJql(q, this._cfg.project)?.byKey) {
+                this._results.destroy_all_children();
+                this._showStatus('Nenhum card encontrado.');
+                return;
+            }
+            this._showStatus(ERRORS[e.kind ?? (e.status === 401 || e.status === 403 ? 'auth' : 'net')]);
+        }
+    }
+
+    _showStatus(text) {
+        this._status.text = text;
+        this._status.visible = Boolean(text);
+    }
+
+    _lozenge(status) {
+        const col = columnMap(this._state.board).get(String(status?.id)) ?? 'none';
+        return label((status?.name ?? '').toUpperCase(), `jw-tag jw-st-${col}`);
+    }
+
+    // Um card aberto por vez: clicar numa linha fechada abre ela e fecha a anterior.
+    _fillRow(row, open) {
+        row.box.destroy_all_children();
+        row.open = open;
+        const f = row.issue.fields;
+        if (!open) {
+            const line = new St.Button({style_class: 'jw-row', can_focus: true, x_expand: true, accessible_name: `${row.issue.key} ${f.summary}`});
+            const b = new St.BoxLayout({style_class: 'jw-row-box', x_expand: true});
+            b.add_child(label(row.issue.key, 'jw-key'));
+            const title = label(f.summary, 'jw-row-title', {x_expand: true});
+            title.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+            b.add_child(title);
+            b.add_child(this._lozenge(f.status));
+            line.set_child(b);
+            line.connect('clicked', () => {
+                for (const other of this._rows.filter(r => r.open))
+                    this._fillRow(other, false);
+                this._fillRow(row, true);
+            });
+            row.box.add_child(line);
+            return;
+        }
+        const card = new St.BoxLayout({vertical: true, style_class: 'jw-card'});
+        const path = new St.BoxLayout({style_class: 'jw-path'});
+        if (f.parent) {
+            path.add_child(button(f.parent.fields?.summary ?? f.parent.key, 'jw-link', () => this._launch(this._browse(f.parent.key))));
+            path.add_child(label('/', 'jw-muted'));
+        }
+        path.add_child(button(row.issue.key, 'jw-link jw-key-link', () => this._launch(this._browse(row.issue.key))));
+        path.add_child(new St.Widget({x_expand: true}));
+        path.add_child(this._lozenge(f.status));
+        card.add_child(path);
+        card.add_child(wrap(label(f.summary, 'jw-card-title')));
+
+        const grid = new St.BoxLayout({vertical: true, style_class: 'jw-fields'});
+        const fieldRow = (name, value) => {
+            const r = new St.BoxLayout({style_class: 'jw-field'});
+            r.add_child(label(name, 'jw-field-name', {y_align: Clutter.ActorAlign.START}));
+            r.add_child(value);
+            grid.add_child(r);
+        };
+        const who = new St.BoxLayout({style_class: 'jw-who'});
+        if (f.assignee) {
+            who.add_child(label(initials(f.assignee.displayName), 'jw-avatar'));
+            who.add_child(label(f.assignee.displayName));
+        } else {
+            who.add_child(label('Sem responsável', 'jw-muted'));
+        }
+        fieldRow('Responsável', who);
+        row.dev = new St.BoxLayout({vertical: true, style_class: 'jw-dev'});
+        row.dev.add_child(label('buscando PRs…', 'jw-muted'));
+        fieldRow('Desenvolvimento', row.dev);
+        const atts = new St.BoxLayout({vertical: true, style_class: 'jw-atts'});
+        for (const a of f.attachment ?? [])
+            atts.add_child(button(a.filename, 'jw-link', () => this._launch(attachmentUrl(this._cfg.site, a)), {x_align: Clutter.ActorAlign.START}));
+        if (!atts.get_n_children())
+            atts.add_child(label('Nenhum', 'jw-muted'));
+        fieldRow('Anexos', atts);
+        card.add_child(grid);
+
+        row.actions = new St.BoxLayout({style_class: 'jw-actions'});
+        row.actions.add_child(button('Abrir no Jira', 'jw-primary', () => this._launch(this._browse(row.issue.key))));
+        const copy = button('Copiar link', 'jw-secondary', () => {
+            St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, this._browse(row.issue.key));
+            copy.label = 'Copiado';
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1600, () => {
+                if (!this._destroyed && copy.get_stage())
+                    copy.label = 'Copiar link';
+                return GLib.SOURCE_REMOVE;
+            });
+        });
+        row.actions.add_child(copy);
+        card.add_child(row.actions);
+        row.box.add_child(card);
+        this._openCard(row);
+    }
+
+    _browse(key) {
+        return `${this._cfg.site}/browse/${key}`;
+    }
+
+    _launch(uri) {
+        Gio.AppInfo.launch_default_for_uri(uri, null);
+        this.menu.close();
+    }
+
+    // Gancho das PRs do card (por demanda, só deste card).
+    _openCard(_row) {}
 
     destroy() {
         this._destroyed = true;
@@ -187,6 +426,9 @@ class Indicator extends PanelMenu.Button {
         if (this._debounce)
             GLib.source_remove(this._debounce);
         this._monitor?.cancel();
+        if (this._searchTimer)
+            GLib.source_remove(this._searchTimer);
+        this._searchCancel?.cancel();
         this._client?.abort();
         super.destroy();
     }
