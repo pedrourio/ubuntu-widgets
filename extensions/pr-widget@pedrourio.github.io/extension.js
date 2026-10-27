@@ -56,7 +56,10 @@ class Indicator extends PanelMenu.Button {
         this._cfg = loadConfig();
         this._render();
         this.menu.connect('open-state-changed', (_m, open) => {
-            if (open)
+            // Com o menu aberto o conteúdo não é refeito (apagaria o que está sendo digitado).
+            if (open && this._dirty)
+                this._render();
+            else if (open)
                 this._syncUpdated();
         });
 
@@ -64,15 +67,36 @@ class Indicator extends PanelMenu.Button {
         this._monitor.connect('changed', (_m, _f, _o, event) => {
             if (event !== Gio.FileMonitorEvent.CHANGES_DONE_HINT && event !== Gio.FileMonitorEvent.CREATED)
                 return;
-            this._cfg = loadConfig();
-            this.refresh();
+            // Junta salvamentos seguidos (ex.: arrastar o seletor de cor) numa consulta só.
+            if (this._debounce)
+                GLib.source_remove(this._debounce);
+            this._debounce = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, 2, () => {
+                this._debounce = null;
+                this._cfg = loadConfig();
+                this._startTimer();
+                this.refresh();
+                return GLib.SOURCE_REMOVE;
+            });
         });
 
         this.refresh();
-        this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, this._cfg.intervalMinutes * 60, () => {
+        this._startTimer();
+    }
+
+    _startTimer() {
+        if (this._timer)
+            GLib.source_remove(this._timer);
+        this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_LOW, Math.max(1, this._cfg.intervalMinutes) * 60, () => {
             this.refresh();
             return GLib.SOURCE_CONTINUE;
         });
+    }
+
+    _renderWhenClosed() {
+        if (this.menu.isOpen)
+            this._dirty = true;
+        else
+            this._render();
     }
 
     refresh() {
@@ -113,7 +137,7 @@ class Indicator extends PanelMenu.Button {
     }
 
     _apply(data, partialError) {
-        const ctx = {me: data.viewer.login, reviewer: this._cfg.reviewer, repoPrefix: this._cfg.repoPrefix};
+        const ctx = {me: data.viewer.login, reviewer: this._cfg.reviewer, repoPrefix: this._cfg.repoPrefix, cardPattern: this._cfg.cardPattern};
         const extraNodes = Object.keys(data).filter(k => /^x\d+$/.test(k)).map(k => data[k]?.pullRequest);
         const seen = new Set();
         this._items = [...data.search.nodes, ...extraNodes]
@@ -127,14 +151,14 @@ class Indicator extends PanelMenu.Button {
         this._updatedAt = Date.now();
         writeJson(CACHE_PATH, this._items.map(p => ({key: p.key, title: p.title})));
         this._updatePill();
-        this._render();
+        this._renderWhenClosed();
     }
 
     _fail(message) {
         this._busy = false;
         this._error = message;
         this._updatePill();
-        this._render();
+        this._renderWhenClosed();
     }
 
     _updatePill() {
@@ -149,6 +173,7 @@ class Indicator extends PanelMenu.Button {
     }
 
     _render() {
+        this._dirty = false;
         this.menu.removeAll();
         const content = new St.BoxLayout({vertical: true, style_class: 'prw-content'});
         const item = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false, style_class: 'prw-item'});
@@ -165,6 +190,8 @@ class Indicator extends PanelMenu.Button {
 
         if (this._error)
             content.add_child(label(`Erro ao consultar o GitHub: ${this._error}`, 'prw-errortext'));
+        if (!this._cfg.reviewer)
+            content.add_child(label(`Defina "reviewer" em ${CONFIG_PATH} para ver o status do reviewer.`, 'prw-errortext'));
 
         const c = counts(this._items);
         const chips = new St.BoxLayout({style_class: 'prw-chips'});
@@ -319,6 +346,8 @@ class Indicator extends PanelMenu.Button {
         this._destroyed = true;
         if (this._timer)
             GLib.source_remove(this._timer);
+        if (this._debounce)
+            GLib.source_remove(this._debounce);
         this._monitor?.cancel();
         super.destroy();
     }

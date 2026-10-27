@@ -30,7 +30,10 @@ export function parsePrRef(text, defaultOwner = '') {
 
 const maxDate = dates => dates.filter(Boolean).reduce((a, b) => (a > b ? a : b), '');
 
-export function classify(pr, {me, reviewer, repoPrefix = ''}, prev) {
+// Código de card no título; padrão = chave de issue do Jira (ABC-123).
+export const DEFAULT_CARD_PATTERN = '\\b[A-Z][A-Z0-9]+-\\d+\\b';
+
+export function classify(pr, {me, reviewer, repoPrefix = '', cardPattern = DEFAULT_CARD_PATTERN}, prev) {
     const reviews = pr.reviews.nodes;
     const bot = reviews.filter(r => r.author?.login === reviewer);
     const last = bot.at(-1);
@@ -70,7 +73,7 @@ export function classify(pr, {me, reviewer, repoPrefix = ''}, prev) {
         waitingBot: pending && !botSpokeLast,
         ready: status === 'pass' && clean && !conflict,
         since: pending ? (botSpokeLast ? last.submittedAt : myLast) : null,
-        card: pr.title.match(/MLK-\d+/)?.[0] ?? null,
+        card: pr.title.match(new RegExp(cardPattern))?.[0] ?? null,
     };
 }
 

@@ -46,3 +46,9 @@ assert(ids === 'reply:a ready:b g:f card-MLK-2:cd nogroup:e', `agrupamento exclu
 assert(counts([{needsReply: true, status: 'warn'}, {status: 'none'}]).noReview === 1, 'contagem');
 
 print('ok: todas as regras passaram');
+
+c = classify(pr([], [], '2026-01-01', {title: 'fix(PROJ-42): usa UTF-8'}), ctx);
+assert(c.card === 'PROJ-42', `card pelo padrão Jira (${c.card})`);
+c = classify(pr([], [], '2026-01-01', {title: 'ajuste #77'}), {...ctx, cardPattern: '#\\d+'});
+assert(c.card === '#77', 'cardPattern configurável');
+print('ok: cardPattern');

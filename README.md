@@ -29,6 +29,7 @@ Configuração em `~/.config/pr-widget/config.json` (grupos e cores também se e
   "repoPrefix": "prefixo-removido-do-nome-do-repo-",
   "intervalMinutes": 5,
   "autoGroupByCard": true,
+  "cardPattern": "\\b[A-Z][A-Z0-9]+-\\d+\\b",
   "groups": [{"id": "g1", "name": "Meu grupo", "color": "#62a0ea"}],
   "assign": {"org/repo#123": "g1"},
   "extra": ["org/repo#456"]

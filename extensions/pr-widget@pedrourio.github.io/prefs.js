@@ -64,7 +64,7 @@ export default class PrWidgetPreferences extends ExtensionPreferences {
 
             const prs = new Adw.PreferencesGroup({title: 'PRs e seus grupos'});
             const auto = new Adw.SwitchRow({
-                title: 'Agrupar sozinho pelo código do card (MLK-XXXX)',
+                title: 'Agrupar sozinho pelo código do card (ex.: ABC-123)',
                 subtitle: 'Vale para PRs sem grupo quando há mais de uma do mesmo card',
                 active: cfg.autoGroupByCard,
             });
