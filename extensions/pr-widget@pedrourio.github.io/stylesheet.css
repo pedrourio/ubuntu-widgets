@@ -61,3 +61,4 @@
 .prw-primary:hover, .prw-primary:focus { background-color: #4a90e8; }
 .prw-link { color: #99c1f1; padding: 6px 0; }
 .prw-link:hover, .prw-link:focus { color: #c3dcf7; }
+.prw-search { min-height: 32px; }

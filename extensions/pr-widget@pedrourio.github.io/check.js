@@ -1,5 +1,5 @@
 // gjs -m check.js  → falha com exceção se alguma regra de logic.js quebrar.
-import {classify, parsePrRef, groupPrs, counts} from './logic.js';
+import {classify, parsePrRef, groupPrs, counts, matchesQuery} from './logic.js';
 
 const assert = (cond, msg) => {
     if (!cond)
@@ -52,3 +52,10 @@ assert(c.card === 'PROJ-42', `card pelo padrão Jira (${c.card})`);
 c = classify(pr([], [], '2026-01-01', {title: 'ajuste #77'}), {...ctx, cardPattern: '#\\d+'});
 assert(c.card === '#77', 'cardPattern configurável');
 print('ok: cardPattern');
+
+const sample = {num: 1266, title: 'feat: cadastro identificado por credencial e CNPJ', repo: 'backend'};
+assert(matchesQuery(sample, '') && matchesQuery(sample, '#12') && matchesQuery(sample, '1266'), 'busca por número');
+assert(!matchesQuery(sample, '1271'), 'número diferente não casa');
+assert(matchesQuery(sample, 'credêncial cnpj') && matchesQuery(sample, 'backend cadastro'), 'busca por palavras, sem acento');
+assert(!matchesQuery(sample, 'credencial audiometria'), 'todas as palavras precisam casar');
+print('ok: busca');

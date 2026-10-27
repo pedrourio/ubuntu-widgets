@@ -104,6 +104,19 @@ export function groupPrs(items, cfg, extraKeys) {
     return groups.filter(g => g.prs.length);
 }
 
+const fold = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+// Só dígitos (com ou sem #) = número da PR; senão todas as palavras no título/repo, sem acento.
+export function matchesQuery(p, query) {
+    const q = fold(query.trim()).replace(/^#/, '');
+    if (!q)
+        return true;
+    if (/^\d+$/.test(q))
+        return String(p.num).startsWith(q);
+    const hay = fold(`${p.title} ${p.repo}`);
+    return q.split(/\s+/).every(t => hay.includes(t));
+}
+
 export function counts(items) {
     return {
         total: items.length,

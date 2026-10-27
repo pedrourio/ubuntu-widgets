@@ -8,7 +8,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
-import {buildQuery, classify, groupPrs, counts, parsePrRef, relTime} from './logic.js';
+import {buildQuery, classify, groupPrs, counts, parsePrRef, relTime, matchesQuery} from './logic.js';
 import {loadConfig, saveConfig, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 
 const COUNTERS = ['reply', 'waiting', 'ready', 'conflict'];
@@ -61,6 +61,10 @@ class Indicator extends PanelMenu.Button {
                 this._render();
             else if (open)
                 this._syncUpdated();
+            if (open)
+                this._search.grab_key_focus(); // já dá para digitar ao abrir
+            else
+                this._search.text = '';
         });
 
         this._monitor = Gio.File.new_for_path(CONFIG_PATH).monitor_file(Gio.FileMonitorFlags.NONE, null);
@@ -201,15 +205,46 @@ class Indicator extends PanelMenu.Button {
         }
         content.add_child(chips);
 
+        this._search = new St.Entry({hint_text: 'Buscar por número ou título', can_focus: true, x_expand: true, style_class: 'prw-entry prw-search', text: this._query ?? ''});
+        this._search.set_primary_icon(new St.Icon({icon_name: 'edit-find-symbolic', icon_size: 14}));
+        this._search.clutter_text.connect('text-changed', () => {
+            this._query = this._search.text;
+            this._applyFilter();
+        });
+        content.add_child(this._search);
+
         const list = new St.BoxLayout({vertical: true, style_class: 'prw-list'});
         const extraKeys = new Set(this._cfg.extra);
+        this._groupRefs = [];
         for (const g of groupPrs(this._items, this._cfg, extraKeys))
             list.add_child(this._group(g));
+        this._noMatch = label('Nenhuma PR encontrada.', 'prw-muted', {visible: false});
+        list.add_child(this._noMatch);
         const scroll = new St.ScrollView({style_class: 'prw-scroll', hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC});
         scroll.set_child(list);
         content.add_child(scroll);
 
         content.add_child(this._footer());
+        this._applyFilter();
+    }
+
+    // Filtra em memória: nenhuma consulta nova ao GitHub.
+    _applyFilter() {
+        const q = this._query ?? '';
+        let any = false;
+        for (const g of this._groupRefs) {
+            let shown = 0;
+            for (const {p, row} of g.items) {
+                row.visible = matchesQuery(p, q);
+                shown += row.visible ? 1 : 0;
+            }
+            g.box.visible = shown > 0;
+            // buscando, grupos recolhidos abrem para mostrar o que casou
+            g.rows.visible = q.trim() ? true : !this._collapsed.has(g.id);
+            g.toggle.child.icon_name = g.rows.visible ? 'pan-down-symbolic' : 'pan-end-symbolic';
+            any ||= shown > 0;
+        }
+        this._noMatch.visible = !any && this._items.length > 0;
     }
 
     _syncUpdated() {
@@ -240,9 +275,11 @@ class Indicator extends PanelMenu.Button {
         toggle.add_style_class_name('prw-flat');
         head.add_child(toggle);
         box.add_child(head);
-        for (const p of g.prs)
-            rows.add_child(this._row(p));
+        const items = g.prs.map(p => ({p, row: this._row(p)}));
+        for (const {row} of items)
+            rows.add_child(row);
         box.add_child(rows);
+        this._groupRefs.push({id: g.id, box, rows, toggle, items});
         return box;
     }
 
