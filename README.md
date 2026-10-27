@@ -1,4 +1,4 @@
-# gnome-desktop-tweaks
+# ubuntu-widgets
 
 Extensões pequenas para a barra do topo do GNOME Shell 50 (Wayland), feitas para gastar quase nada de RAM: rodam dentro do próprio shell, sem processo extra.
 
