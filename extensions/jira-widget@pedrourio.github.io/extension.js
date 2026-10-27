@@ -13,6 +13,7 @@ import {loadConfig, readJson, writeJson, CONFIG_PATH, CACHE_PATH} from './config
 import {lookupToken} from './secret.js';
 import {JiraClient} from './jira.js';
 import {fetchCardPrs} from './prs.js';
+import {Burndown} from './chart.js';
 
 const DAY = 86400e3;
 const FIELDS = 'summary,status,assignee,parent,issuetype,attachment';
@@ -79,7 +80,11 @@ class Indicator extends PanelMenu.Button {
                 this._render();
             if (open) {
                 this._search.grab_key_focus();
+                // anima só aberto e com o gráfico à vista
+                if (this._burndownBox.visible)
+                    this._chart?.start();
             } else {
+                this._chart?.stop();
                 this._search.text = '';
                 this._searchCancel?.cancel();
             }
@@ -250,7 +255,18 @@ class Indicator extends PanelMenu.Button {
         content.add_child(field);
 
         this._burndownBox = new St.BoxLayout({vertical: true, style_class: 'jw-block'});
-        this._burndownBox.add_child(label('Gráfico de burndown', 'jw-block-title'));
+        const bdHead = new St.BoxLayout();
+        bdHead.add_child(label('Gráfico de burndown', 'jw-block-title', {x_expand: true}));
+        bdHead.add_child(label('Story Points', 'jw-muted'));
+        this._burndownBox.add_child(bdHead);
+        this._chart = null;
+        if (this._state.burndown) {
+            this._chart = new Burndown();
+            this._chart.setData(this._state.burndown);
+            this._burndownBox.add_child(this._chart);
+        } else {
+            this._burndownBox.add_child(label(sprint ? 'Burndown indisponível' : 'Sem sprint ativa para o burndown', 'jw-muted'));
+        }
         content.add_child(this._burndownBox);
 
         this._status = label('', 'jw-muted', {visible: false});
@@ -273,6 +289,10 @@ class Indicator extends PanelMenu.Button {
         const q = this._search.text;
         const empty = !q.trim();
         this._burndownBox.visible = empty;
+        if (empty && this.menu.isOpen)
+            this._chart?.start();
+        else
+            this._chart?.stop();
         if (empty) {
             this._searchCancel?.cancel();
             this._results.destroy_all_children();
