@@ -12,6 +12,7 @@ import {COLUMNS, columnMap, tally, pickActiveSprint, burndownSeries, daysLeft, t
 import {loadConfig, readJson, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 import {lookupToken} from './secret.js';
 import {JiraClient} from './jira.js';
+import {fetchCardPrs} from './prs.js';
 
 const DAY = 86400e3;
 const FIELDS = 'summary,status,assignee,parent,issuetype,attachment';
@@ -416,8 +417,38 @@ class Indicator extends PanelMenu.Button {
         this.menu.close();
     }
 
-    // Gancho das PRs do card (por demanda, só deste card).
-    _openCard(_row) {}
+    // PRs só deste card, só quando ele abre; a busca anterior de PRs é cancelada.
+    async _openCard(row) {
+        this._prCancel?.cancel();
+        const cancel = this._prCancel = new Gio.Cancellable();
+        const dev = row.dev;
+        let prs;
+        try {
+            prs = await fetchCardPrs(row.issue.key, this._cfg.githubOwner, cancel);
+        } catch (e) {
+            if (cancel.is_cancelled() || !dev.get_stage())
+                return;
+            dev.destroy_all_children();
+            dev.add_child(wrap(label(`PRs indisponíveis: ${e.message}`, 'jw-muted')));
+            return;
+        }
+        if (cancel.is_cancelled() || !dev.get_stage())
+            return;
+        dev.destroy_all_children();
+        for (const pr of prs) {
+            const b = new St.Button({style_class: 'jw-link', can_focus: true, x_align: Clutter.ActorAlign.START, accessible_name: `${pr.repo} #${pr.num}`});
+            const l = label('', '');
+            l.clutter_text.set_markup(`${GLib.markup_escape_text(`${pr.repo} #${pr.num}`, -1)} <span foreground="${pr.state === 'OPEN' ? '#f8e6a0' : '#8c9bab'}">· ${GLib.markup_escape_text(pr.text, -1)}</span>`);
+            b.set_child(l);
+            b.connect('clicked', () => this._launch(pr.url));
+            dev.add_child(b);
+        }
+        if (!prs.length)
+            dev.add_child(label('Nenhuma PR encontrada no GitHub', 'jw-muted'));
+        const open = prs.find(p => p.state === 'OPEN');
+        if (open)
+            row.actions.add_child(button(`Abrir PR #${open.num}`, 'jw-secondary', () => this._launch(open.url)));
+    }
 
     destroy() {
         this._destroyed = true;
@@ -429,6 +460,7 @@ class Indicator extends PanelMenu.Button {
         if (this._searchTimer)
             GLib.source_remove(this._searchTimer);
         this._searchCancel?.cancel();
+        this._prCancel?.cancel();
         this._client?.abort();
         super.destroy();
     }

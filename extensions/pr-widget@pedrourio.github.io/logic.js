@@ -1,7 +1,7 @@
 // Regras do widget, sem dependências do GNOME: testáveis com `gjs -m check.js`.
 
 const FRAGMENT = `fragment P on PullRequest {
-  number title url baseRefName mergeable mergeStateStatus
+  number title url state baseRefName mergeable mergeStateStatus
   repository { nameWithOwner }
   reviews(last: 60) { nodes { author { login } state body submittedAt } }
   comments(last: 60) { nodes { author { login } createdAt } }
@@ -16,6 +16,12 @@ export function buildQuery(extra) {
     });
     return `${FRAGMENT}
 query { viewer { login } search(query: "is:pr is:open author:@me archived:false", type: ISSUE, first: 100) { nodes { ...P } } ${parts.join(' ')} }`;
+}
+
+// PRs de um card (o título leva a chave; no corpo, outras PRs só citam o card): usado pelo jira-widget, mesmas regras de classify.
+export function buildCardPrQuery(key, owner) {
+    return `${FRAGMENT}
+query { viewer { login } search(query: ${JSON.stringify(`${key} in:title org:${owner} is:pr`)}, type: ISSUE, first: 10) { nodes { ...P } } }`;
 }
 
 export function parsePrRef(text, defaultOwner = '') {

@@ -1,5 +1,5 @@
 // gjs -m check.js  → falha com exceção se alguma regra de logic.js quebrar.
-import {classify, parsePrRef, groupPrs, counts, matchesQuery} from './logic.js';
+import {classify, parsePrRef, groupPrs, counts, matchesQuery, buildCardPrQuery} from './logic.js';
 
 const assert = (cond, msg) => {
     if (!cond)
@@ -61,3 +61,10 @@ assert(!matchesQuery(sample, '1271'), 'número diferente não casa');
 assert(matchesQuery(sample, 'credêncial cnpj') && matchesQuery(sample, 'backend cadastro'), 'busca por palavras, sem acento');
 assert(!matchesQuery(sample, 'credencial audiometria'), 'todas as palavras precisam casar');
 print('ok: busca');
+
+// PRs de um card (usado pelo jira-widget)
+const cq = buildCardPrQuery('ACME-1', 'Org');
+assert(cq.includes('ACME-1 in:title org:Org is:pr') && cq.includes('...P') && cq.includes('viewer { login }'), 'consulta de PRs do card');
+assert(/fragment P on PullRequest \{\s*number title url state /.test(cq), 'fragmento traz o estado da PR');
+assert(buildCardPrQuery('A"B', 'Org').includes('A\\"B in:title org:Org'), 'chave escapada na consulta');
+print('ok: PRs do card');
