@@ -62,3 +62,7 @@
 .prw-link { color: #99c1f1; padding: 6px 0; }
 .prw-link:hover, .prw-link:focus { color: #c3dcf7; }
 .prw-search { min-height: 32px; }
+.prw-views { spacing: 0; border-radius: 8px; background-color: #3a3a40; padding: 2px; }
+.prw-view { padding: 4px 10px; border-radius: 6px; color: #deddda; font-size: 0.9em; }
+.prw-view:hover, .prw-view:focus { background-color: #4a4a52; }
+.prw-view:checked { background-color: #f6f5f4; color: #241f31; font-weight: bold; }

@@ -80,14 +80,25 @@ export function classify(pr, {me, reviewer, repoPrefix = '', cardPattern = DEFAU
 const AUTO_COLORS = ['#62a0ea', '#c061cb', '#cdab8f', '#dc8add', '#99c1f1', '#f9f06b'];
 const hashColor = s => AUTO_COLORS[[...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % AUTO_COLORS.length];
 
-// Cada PR aparece uma vez: automáticos no topo, depois grupos seus, monitoradas, cards, sem grupo.
-export function groupPrs(items, cfg, extraKeys) {
+export const VIEWS = {status: 'Por status', group: 'Por grupo'};
+
+// Cada PR aparece uma vez por visualização.
+// status: a primeira situação que se aplica, na ordem de urgência.
+// group: seus grupos, monitoradas, cards, sem grupo — nada de status misturado.
+export function groupPrs(items, cfg, extraKeys, view = 'status') {
     const used = new Set();
     const take = pred => items.filter(p => !used.has(p.key) && pred(p)).map(p => (used.add(p.key), p));
-    const groups = [
-        {id: 'reply', name: 'Pedem sua resposta', color: '#ff7b63', prs: take(p => p.needsReply)},
-        {id: 'ready', name: 'Prontas para merge', color: '#57e389', prs: take(p => p.ready), note: 'PASS e sem conflito'},
-    ];
+    if (view === 'status') {
+        return [
+            {id: 'reply', name: 'Pedem sua resposta', color: '#ff7b63', prs: take(p => p.needsReply)},
+            {id: 'waiting', name: `Aguardando ${cfg.reviewerName ?? 'reviewer'}`, color: '#ffa348', prs: take(p => p.waitingBot)},
+            {id: 'ready', name: 'Prontas para merge', color: '#57e389', prs: take(p => p.ready), note: 'PASS e sem conflito'},
+            {id: 'conflict', name: 'Com conflito', color: '#ff9ecb', prs: take(p => p.conflict)},
+            {id: 'noreview', name: 'Sem review', color: '#9a9996', prs: take(p => p.status === 'none')},
+            {id: 'others', name: 'Demais', color: '#77767b', prs: take(() => true), note: 'aprovadas, aguardando checks ou merge'},
+        ].filter(g => g.prs.length);
+    }
+    const groups = [];
     for (const g of cfg.groups)
         groups.push({id: g.id, name: g.name, color: g.color, prs: take(p => cfg.assign[p.key] === g.id)});
     groups.push({id: 'extra', name: 'Monitoradas por você', color: '#dc8add', prs: take(p => extraKeys.has(p.key))});

@@ -37,12 +37,14 @@ assert(parsePrRef('backend#7') === null, 'repo#n sem org padrão');
 assert(parsePrRef('lixo') === null, 'entrada inválida');
 
 const items = [
-    {key: 'a', needsReply: true, card: 'MLK-1'}, {key: 'b', ready: true, card: 'MLK-1'},
-    {key: 'c', card: 'MLK-2'}, {key: 'd', card: 'MLK-2'}, {key: 'e', card: 'MLK-3'}, {key: 'f', card: null},
+    {key: 'a', needsReply: true, conflict: true, status: 'warn', card: 'MLK-1'}, {key: 'b', ready: true, status: 'pass', card: 'MLK-1'},
+    {key: 'c', waitingBot: true, status: 'warn', card: 'MLK-2'}, {key: 'd', conflict: true, status: 'pass', card: 'MLK-2'},
+    {key: 'e', status: 'none', card: 'MLK-3'}, {key: 'f', status: 'pass', card: null},
 ];
-const groups = groupPrs(items, {groups: [{id: 'g', name: 'G', color: '#fff'}], assign: {f: 'g'}, autoGroupByCard: true}, new Set());
-const ids = groups.map(g => `${g.id}:${g.prs.map(p => p.key).join('')}`).join(' ');
-assert(ids === 'reply:a ready:b g:f card-MLK-2:cd nogroup:e', `agrupamento exclusivo (${ids})`);
+const cfgG = {groups: [{id: 'g', name: 'G', color: '#fff'}], assign: {f: 'g', a: 'g'}, autoGroupByCard: true};
+const ids = view => groupPrs(items, cfgG, new Set(), view).map(g => `${g.id}:${g.prs.map(p => p.key).join('')}`).join(' ');
+assert(ids('status') === 'reply:a waiting:c ready:b conflict:d noreview:e others:f', `visão por status (${ids('status')})`);
+assert(ids('group') === 'g:af card-MLK-2:cd nogroup:be', `visão por grupo ignora status (${ids('group')})`);
 assert(counts([{needsReply: true, status: 'warn'}, {status: 'none'}]).noReview === 1, 'contagem');
 
 print('ok: todas as regras passaram');

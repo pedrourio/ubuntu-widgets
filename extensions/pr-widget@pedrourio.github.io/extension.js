@@ -8,7 +8,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
-import {buildQuery, classify, groupPrs, counts, parsePrRef, relTime, matchesQuery} from './logic.js';
+import {buildQuery, classify, groupPrs, counts, parsePrRef, relTime, matchesQuery, VIEWS} from './logic.js';
 import {loadConfig, saveConfig, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 
 const COUNTERS = ['reply', 'waiting', 'ready', 'conflict'];
@@ -36,7 +36,7 @@ class Indicator extends PanelMenu.Button {
         this._ext = ext;
         this._items = [];
         this._prev = new Map();
-        this._collapsed = new Set(['ready', 'nogroup']);
+        this._collapsed = new Set(['others', 'nogroup']);
         this._error = null;
         this._updatedAt = null;
 
@@ -54,6 +54,7 @@ class Indicator extends PanelMenu.Button {
         this.menu.box.add_style_class_name('prw-menu');
         // PopupMenu vazio não abre: o conteúdo precisa existir antes do primeiro clique.
         this._cfg = loadConfig();
+        this._view = this._cfg.viewMode === 'group' ? 'group' : 'status';
         this._render();
         this.menu.connect('open-state-changed', (_m, open) => {
             // Com o menu aberto o conteúdo não é refeito (apagaria o que está sendo digitado).
@@ -186,6 +187,17 @@ class Indicator extends PanelMenu.Button {
 
         const header = new St.BoxLayout({style_class: 'prw-header'});
         header.add_child(label('Minhas PRs abertas', 'prw-title', {x_expand: true}));
+        // Troca de visualização só na memória: salvar no config dispararia outra consulta ao GitHub.
+        const views = new St.BoxLayout({style_class: 'prw-views'});
+        for (const [id, name] of Object.entries(VIEWS)) {
+            const btn = new St.Button({label: name, can_focus: true, toggle_mode: true, checked: this._view === id, style_class: 'prw-view'});
+            btn.connect('clicked', () => {
+                this._view = id;
+                this._render();
+            });
+            views.add_child(btn);
+        }
+        header.add_child(views);
         this._updatedLabel = label('', 'prw-muted');
         this._syncUpdated();
         header.add_child(this._updatedLabel);
@@ -216,7 +228,7 @@ class Indicator extends PanelMenu.Button {
         const list = new St.BoxLayout({vertical: true, style_class: 'prw-list'});
         const extraKeys = new Set(this._cfg.extra);
         this._groupRefs = [];
-        for (const g of groupPrs(this._items, this._cfg, extraKeys))
+        for (const g of groupPrs(this._items, this._cfg, extraKeys, this._view))
             list.add_child(this._group(g));
         this._noMatch = label('Nenhuma PR encontrada.', 'prw-muted', {visible: false});
         list.add_child(this._noMatch);

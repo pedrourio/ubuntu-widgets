@@ -8,5 +8,13 @@ for ext in "$repo"/extensions/*/; do
   ln -sfn "${ext%/}" "$dest/$(basename "$ext")"
   echo "ligado: $(basename "$ext")"
 done
-ln -sfn "$repo/bin/ext-hotload" "$HOME/.local/bin/ext-hotload"
+for bin in ext-hotload pr-status; do
+  ln -sfn "$repo/bin/$bin" "$HOME/.local/bin/$bin"
+done
+# skills do Claude Code: o mesmo repo, para andarem junto com o widget
+mkdir -p "$HOME/.claude/skills"
+for skill in "$repo"/claude-skills/*/; do
+  ln -sfn "${skill%/}" "$HOME/.claude/skills/$(basename "$skill")"
+  echo "skill: $(basename "$skill")"
+done
 echo "Para carregar sem logout: ext-hotload $(cd "$repo/extensions" && echo *)"

@@ -12,6 +12,7 @@ const DEFAULTS = {
     cardPattern: '\\b[A-Z][A-Z0-9]+-\\d+\\b', // regex do código de card no título (padrão: chave do Jira)
     intervalMinutes: 5,
     autoGroupByCard: true,
+    viewMode: 'status', // visualização inicial do menu: 'status' ou 'group'
     groups: [],
     assign: {},
     extra: [],
