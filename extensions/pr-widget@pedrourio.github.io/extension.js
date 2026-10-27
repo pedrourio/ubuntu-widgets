@@ -12,13 +12,18 @@ import {buildQuery, classify, groupPrs, counts, parsePrRef, relTime, matchesQuer
 import {loadConfig, saveConfig, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 
 const COUNTERS = ['reply', 'waiting', 'ready', 'conflict'];
-const STATUS = {
-    pass: ['PASS', 'object-select-symbolic'],
-    approved: ['Aprovada', 'object-select-symbolic'],
-    warn: ['WARN', 'dialog-warning-symbolic'],
-    changes: ['Mudanças pedidas', 'window-close-symbolic'],
-    none: ['Sem review', null],
-};
+const STATUS = {pass: 'PASS', approved: 'aprovada', warn: 'WARN', changes: 'mudanças pedidas', none: 'sem review'};
+
+// Estado da PR pela forma do ícone (lê-se sem depender da cor), na ordem de prioridade.
+const STATE = [
+    ['reply', p => p.needsReply],
+    ['waiting', p => p.waitingBot],
+    ['ready', p => p.ready],
+    ['conflict', p => p.conflict],
+    ['open', () => true],
+];
+
+const esc = t => GLib.markup_escape_text(t, -1);
 
 const label = (text, style_class = '', props = {}) =>
     new St.Label({text, style_class, y_align: Clutter.ActorAlign.CENTER, ...props});
@@ -186,11 +191,18 @@ class Indicator extends PanelMenu.Button {
         this.menu.addMenuItem(item);
 
         const header = new St.BoxLayout({style_class: 'prw-header'});
-        header.add_child(label('Minhas PRs abertas', 'prw-title', {x_expand: true}));
+        header.add_child(label('Minhas PRs', 'prw-title'));
+        this._updatedLabel = label('', 'prw-muted', {x_expand: true});
+        this._syncUpdated();
+        header.add_child(this._updatedLabel);
         // Troca de visualização só na memória: salvar no config dispararia outra consulta ao GitHub.
         const views = new St.BoxLayout({style_class: 'prw-views'});
         for (const [id, name] of Object.entries(VIEWS)) {
-            const btn = new St.Button({label: name, can_focus: true, toggle_mode: true, checked: this._view === id, style_class: 'prw-view'});
+            const tab = new St.BoxLayout({style_class: 'prw-tab-box'});
+            tab.add_child(label(name));
+            if (this._view === id)
+                tab.add_child(label(String(this._items.length), 'prw-counter'));
+            const btn = new St.Button({child: tab, can_focus: true, toggle_mode: true, checked: this._view === id, style_class: 'prw-view'});
             btn.connect('clicked', () => {
                 this._view = id;
                 this._render();
@@ -198,10 +210,9 @@ class Indicator extends PanelMenu.Button {
             views.add_child(btn);
         }
         header.add_child(views);
-        this._updatedLabel = label('', 'prw-muted');
-        this._syncUpdated();
-        header.add_child(this._updatedLabel);
-        header.add_child(iconButton('view-refresh-symbolic', 'Atualizar agora', () => this.refresh()));
+        const refresh = iconButton('view-refresh-symbolic', 'Atualizar agora', () => this.refresh());
+        refresh.add_style_class_name('prw-flat');
+        header.add_child(refresh);
         content.add_child(header);
 
         if (this._error)
@@ -261,20 +272,13 @@ class Indicator extends PanelMenu.Button {
 
     _syncUpdated() {
         this._updatedLabel.text = this._updatedAt
-            ? `Atualizado ${relTime(new Date(this._updatedAt).toISOString())}`
+            ? `${this._items.length} abertas · ${relTime(new Date(this._updatedAt).toISOString())}`
             : 'Atualizando…';
     }
 
     _group(g) {
         const box = new St.BoxLayout({vertical: true, style_class: 'prw-group'});
         const head = new St.BoxLayout({style_class: 'prw-group-header'});
-        head.add_child(new St.Widget({style_class: 'prw-dot', style: `background-color: ${g.color};`, y_align: Clutter.ActorAlign.CENTER}));
-        head.add_child(label(g.name, 'prw-group-name', {x_expand: true}));
-        const conflicts = g.prs.filter(p => p.conflict).length;
-        const note = g.note ?? (conflicts ? `${conflicts} com conflito` : '');
-        if (note)
-            head.add_child(label(note, 'prw-muted'));
-        head.add_child(label(String(g.prs.length), 'prw-count', {accessible_name: `${g.prs.length} PRs`}));
         const rows = new St.BoxLayout({vertical: true, visible: !this._collapsed.has(g.id)});
         const toggle = iconButton(rows.visible ? 'pan-down-symbolic' : 'pan-end-symbolic', `Recolher ou expandir ${g.name}`, () => {
             rows.visible = !rows.visible;
@@ -285,7 +289,16 @@ class Indicator extends PanelMenu.Button {
             toggle.child.icon_name = rows.visible ? 'pan-down-symbolic' : 'pan-end-symbolic';
         });
         toggle.add_style_class_name('prw-flat');
+        toggle.add_style_class_name('prw-toggle');
         head.add_child(toggle);
+        // a cor do grupo só importa na visão por grupo; por status o ícone de cada PR já diz
+        if (this._view === 'group')
+            head.add_child(new St.Widget({style_class: 'prw-dot', style: `background-color: ${g.color};`, y_align: Clutter.ActorAlign.CENTER}));
+        head.add_child(label(g.name, 'prw-group-name'));
+        head.add_child(label(String(g.prs.length), 'prw-counter', {accessible_name: `${g.prs.length} PRs`}));
+        const conflicts = g.prs.filter(p => p.conflict).length;
+        const note = g.note ?? (conflicts && g.id !== 'conflict' ? `${conflicts} com conflito` : '');
+        head.add_child(label(note, 'prw-muted prw-note', {x_expand: true, x_align: Clutter.ActorAlign.END}));
         box.add_child(head);
         const items = g.prs.map(p => ({p, row: this._row(p)}));
         for (const {row} of items)
@@ -296,45 +309,44 @@ class Indicator extends PanelMenu.Button {
     }
 
     _row(p) {
-        const row = new St.BoxLayout({style_class: p.needsReply ? 'prw-row prw-row-reply' : 'prw-row'});
+        const row = new St.BoxLayout({style_class: 'prw-row', reactive: true, track_hover: true, can_focus: true});
+        const [state] = STATE.find(([, test]) => test(p));
+        row.add_child(new St.Icon({
+            gicon: Gio.icon_new_for_string(`${this._ext.path}/state-${state}-symbolic.svg`),
+            icon_size: 16, style_class: `prw-state prw-state-${state}`, y_align: Clutter.ActorAlign.START,
+        }));
+
         const body = new St.BoxLayout({vertical: true, x_expand: true, style_class: 'prw-row-body'});
-
-        const top = new St.BoxLayout({style_class: 'prw-line'});
-        top.add_child(label(p.repo, 'prw-repo'));
-        top.add_child(label(`#${p.num}`, 'prw-muted'));
-        body.add_child(top);
-
         const title = label(p.title, 'prw-pr-title', {x_expand: true});
         title.clutter_text.line_wrap = true;
         title.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
         title.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
         body.add_child(title);
 
-        const meta = new St.BoxLayout({style_class: 'prw-line'});
-        const [statusText, statusIcon] = STATUS[p.status];
-        const badge = new St.BoxLayout({style_class: `prw-status prw-status-${p.status}`});
-        if (statusIcon)
-            badge.add_child(new St.Icon({icon_name: statusIcon, icon_size: 12, y_align: Clutter.ActorAlign.CENTER}));
-        badge.add_child(label(statusText));
-        meta.add_child(badge);
-        const who = this._cfg.reviewerName;
-        meta.add_child(label(p.reviews === 0 ? `Nenhum review do ${who}` : p.reviews === 1 ? `1 review do ${who}` : `${p.reviews} reviews do ${who}`, 'prw-muted'));
-        body.add_child(meta);
-
-        const flags = new St.BoxLayout({style_class: 'prw-line'});
-        if (p.needsReply)
-            flags.add_child(label(`Sem resposta sua · ${relTime(p.since)}`, 'prw-flag prw-flag-reply'));
+        // tudo que não é o título numa linha cinza; só o conflito ganha cor
+        const parts = [esc(`${p.repo} #${p.num}`), esc(STATUS[p.status])];
         if (p.waitingBot)
-            flags.add_child(label(`Aguardando ${who} · você respondeu ${relTime(p.since)}`, 'prw-flag prw-flag-waiting'));
-        if (p.ready)
-            flags.add_child(label('Pronta para merge', 'prw-flag prw-flag-ready'));
+            parts.push('você respondeu');
         if (p.conflict)
-            flags.add_child(label(`Com conflito com ${p.base}`, 'prw-flag prw-flag-conflict'));
-        if (flags.get_n_children())
-            body.add_child(flags);
+            parts.push(`<span foreground="#e275ad">${esc(`conflito com ${p.base}`)}</span>`);
+        const meta = label('', 'prw-meta');
+        meta.clutter_text.set_markup(parts.join(' · '));
+        meta.clutter_text.line_wrap = true;
+        body.add_child(meta);
         row.add_child(body);
 
-        const actions = new St.BoxLayout({style_class: 'prw-actions', y_align: Clutter.ActorAlign.START});
+        // números à direita, no mesmo lugar em toda linha; os botões ocupam esse lugar no hover
+        const info = new St.BoxLayout({vertical: true, style_class: 'prw-info', y_align: Clutter.ActorAlign.START});
+        const reviews = new St.BoxLayout({style_class: 'prw-info-line', x_align: Clutter.ActorAlign.END,
+            accessible_name: `${p.reviews} reviews do ${this._cfg.reviewerName}`});
+        reviews.add_child(new St.Icon({gicon: Gio.icon_new_for_string(`${this._ext.path}/state-reply-symbolic.svg`), icon_size: 12}));
+        reviews.add_child(label(String(p.reviews)));
+        info.add_child(reviews);
+        if (p.since)
+            info.add_child(label(relTime(p.since), '', {x_align: Clutter.ActorAlign.END}));
+        row.add_child(info);
+
+        const actions = new St.BoxLayout({style_class: 'prw-actions', y_align: Clutter.ActorAlign.START, visible: false});
         actions.add_child(iconButton('web-browser-symbolic', `Abrir PR ${p.num} no navegador`, () => {
             Gio.AppInfo.launch_default_for_uri(p.url, null);
             this.menu.close();
@@ -353,6 +365,27 @@ class Indicator extends PanelMenu.Button {
         });
         actions.add_child(copy);
         row.add_child(actions);
+
+        // botões aparecem com o mouse em cima ou com o foco do teclado na linha ou num dos botões
+        const sync = () => {
+            const focus = global.stage.key_focus;
+            const active = row.hover || (focus !== null && row.contains(focus));
+            actions.visible = active;
+            info.visible = !active;
+            if (active)
+                row.add_style_pseudo_class('active');
+            else
+                row.remove_style_pseudo_class('active');
+        };
+        row.connect('notify::hover', sync);
+        for (const a of [row, ...actions.get_children()]) {
+            a.connect('key-focus-in', sync);
+            a.connect('key-focus-out', () => GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                if (!this._destroyed && row.get_stage())
+                    sync();
+                return GLib.SOURCE_REMOVE;
+            }));
+        }
         return row;
     }
 

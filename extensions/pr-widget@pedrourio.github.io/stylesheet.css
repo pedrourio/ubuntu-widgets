@@ -8,14 +8,17 @@
 .prw-ready { background-color: #57e389; }
 .prw-conflict { background-color: #ff9ecb; }
 
-/* menu */
+/* menu: tons do tema "escurecido" do GitHub, contraste mais baixo para o olho */
+.prw-menu { background-color: #22272e; border: 1px solid #373e47; color: #adbac7; }
 .prw-item { padding: 0; }
 .prw-item:hover, .prw-item:focus { background-color: transparent; }
-.prw-content { width: 580px; spacing: 10px; padding: 8px 6px; }
+.prw-content { width: 600px; spacing: 12px; padding: 8px 6px; }
 .prw-header { spacing: 10px; }
-.prw-title { font-weight: bold; font-size: 1.1em; }
-.prw-muted { color: #b8b8bf; font-size: 0.9em; }
-.prw-errortext { color: #ffb3a7; font-size: 0.9em; }
+.prw-title { font-weight: 600; font-size: 1.2em; color: #cdd9e5; }
+.prw-muted { color: #768390; font-size: 0.9em; }
+.prw-errortext { color: #f47067; font-size: 0.9em; }
+
+/* contadores do topo do menu: mantidos como antes */
 .prw-chips { spacing: 6px; }
 .prw-chip { padding: 2px 9px; border-radius: 12px; font-size: 0.9em; border: 1px solid transparent; }
 .prw-chip-reply { background-color: rgba(255, 123, 99, 0.18); color: #ffb3a7; font-weight: bold; }
@@ -24,45 +27,45 @@
 .prw-chip-conflict { border-color: #ff9ecb; color: #ffc2de; }
 .prw-chip-noReview { background-color: #3a3a40; color: #deddda; }
 .prw-scroll { max-height: 620px; }
-.prw-list { spacing: 4px; }
+.prw-list { spacing: 0; border: 1px solid #373e47; border-radius: 8px; }
 
-.prw-group { spacing: 2px; }
-.prw-group-header { spacing: 8px; padding: 6px 8px; }
+.prw-group { spacing: 0; }
+.prw-group-header { spacing: 8px; padding: 6px 12px 6px 6px; background-color: #2d333b; border-bottom: 1px solid #373e47; }
+.prw-toggle { width: 24px; height: 24px; }
 .prw-dot { width: 10px; height: 10px; border-radius: 5px; }
-.prw-group-name { font-weight: bold; font-size: 0.9em; color: #deddda; }
-.prw-count { min-width: 22px; height: 22px; padding: 0 4px; border-radius: 11px; border: 1.5px solid #77767b; color: #deddda; font-size: 0.8em; font-weight: bold; text-align: center; }
+.prw-group-name { font-weight: 600; color: #cdd9e5; }
+.prw-counter { padding: 0 7px; border-radius: 10px; background-color: #444c56; color: #adbac7; font-size: 0.8em; font-weight: normal; }
+.prw-note { font-size: 0.85em; }
 
-.prw-row { spacing: 10px; padding: 10px; border-radius: 10px; }
-.prw-row-reply { background-color: rgba(255, 123, 99, 0.07); }
-.prw-row-body { spacing: 6px; }
-.prw-line { spacing: 8px; }
+.prw-row { spacing: 12px; padding: 10px 14px; border-bottom: 1px solid #373e47; }
+.prw-row:active, .prw-row:focus { background-color: #2a3038; }
+.prw-state { margin-top: 2px; color: #768390; }
+.prw-state-reply { color: #ec775c; }
+.prw-state-waiting { color: #c69026; }
+.prw-state-ready { color: #57ab5a; }
+.prw-state-conflict { color: #e275ad; }
+.prw-row-body { spacing: 3px; }
+.prw-pr-title { font-weight: 600; font-size: 1.05em; color: #cdd9e5; }
+.prw-meta { color: #768390; font-size: 0.9em; }
+.prw-info { spacing: 3px; color: #768390; font-size: 0.9em; min-width: 52px; }
+.prw-info-line { spacing: 4px; }
 .prw-actions { spacing: 4px; }
-.prw-repo { padding: 1px 8px; border-radius: 6px; background-color: #3a3a40; color: #deddda; font-family: monospace; font-size: 0.9em; }
-.prw-pr-title { color: #ffffff; }
-.prw-status { padding: 2px 9px; border-radius: 10px; font-weight: bold; font-size: 0.9em; spacing: 4px; }
-.prw-status-pass, .prw-status-approved { background-color: rgba(87, 227, 137, 0.16); color: #8ff0a4; }
-.prw-status-warn { background-color: rgba(248, 228, 92, 0.16); color: #f8e45c; }
-.prw-status-changes { background-color: rgba(255, 123, 99, 0.18); color: #ffb3a7; }
-.prw-status-none { background-color: #3a3a40; color: #deddda; }
-.prw-flag { padding: 1px 8px; border-radius: 10px; border: 1px solid transparent; font-size: 0.9em; }
-.prw-flag-reply { background-color: rgba(255, 123, 99, 0.18); color: #ffb3a7; font-weight: bold; }
-.prw-flag-waiting { border-color: #ffa348; color: #ffc68f; }
-.prw-flag-ready { border-color: #57e389; color: #8ff0a4; font-weight: bold; }
-.prw-flag-conflict { border-color: #ff9ecb; color: #ffc2de; font-weight: bold; }
 
-.prw-btn { width: 34px; height: 34px; border-radius: 8px; background-color: #3a3a40; color: #ffffff; }
-.prw-btn:hover, .prw-btn:focus { background-color: #4a4a52; }
-.prw-btn-done, .prw-btn-done:hover { background-color: #26a269; }
-.prw-flat { background-color: transparent; color: #b8b8bf; width: 28px; height: 28px; }
+.prw-btn { width: 30px; height: 30px; border-radius: 6px; background-color: #373e47; border: 1px solid #444c56; color: #adbac7; }
+.prw-btn:hover, .prw-btn:focus { background-color: #444c56; color: #cdd9e5; }
+.prw-btn-done, .prw-btn-done:hover { background-color: #347d39; color: #ffffff; }
+.prw-flat { background-color: transparent; border-color: transparent; color: #768390; width: 28px; height: 28px; }
 
-.prw-footer { spacing: 8px; padding-top: 10px; border-top: 1px solid #3d3d43; }
-.prw-entry { min-height: 34px; }
-.prw-primary { padding: 0 16px; height: 34px; border-radius: 8px; background-color: #3584e4; color: #ffffff; font-weight: bold; }
-.prw-primary:hover, .prw-primary:focus { background-color: #4a90e8; }
-.prw-link { color: #99c1f1; padding: 6px 0; }
-.prw-link:hover, .prw-link:focus { color: #c3dcf7; }
+.prw-footer { spacing: 8px; padding-top: 10px; border-top: 1px solid #373e47; }
+.prw-entry { min-height: 32px; background-color: #1c2128; border: 1px solid #373e47; color: #adbac7; border-radius: 6px; }
+.prw-entry:focus { border-color: #539bf5; }
+.prw-primary { padding: 0 16px; height: 32px; border-radius: 6px; background-color: #347d39; color: #ffffff; font-weight: 600; }
+.prw-primary:hover, .prw-primary:focus { background-color: #46954a; }
+.prw-link { color: #539bf5; padding: 6px 0; }
+.prw-link:hover, .prw-link:focus { color: #6cb6ff; }
 .prw-search { min-height: 32px; }
-.prw-views { spacing: 0; border-radius: 8px; background-color: #3a3a40; padding: 2px; }
-.prw-view { padding: 4px 10px; border-radius: 6px; color: #deddda; font-size: 0.9em; }
-.prw-view:hover, .prw-view:focus { background-color: #4a4a52; }
-.prw-view:checked { background-color: #f6f5f4; color: #241f31; font-weight: bold; }
+.prw-views { spacing: 16px; }
+.prw-view { padding: 2px 0 4px; color: #768390; border-bottom: 2px solid transparent; }
+.prw-view:hover, .prw-view:focus { color: #adbac7; }
+.prw-view:checked { color: #cdd9e5; font-weight: 600; border-bottom-color: #ec775c; }
+.prw-tab-box { spacing: 6px; }
