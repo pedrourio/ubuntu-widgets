@@ -58,12 +58,15 @@ export function classify(pr, {me, reviewer, repoPrefix = '', cardPattern = DEFAU
         ...pr.comments.nodes.filter(c => c.author?.login === me).map(c => c.createdAt),
         pr.commits.nodes[0]?.commit.committedDate,
     ]);
-    const pending = status === 'warn' || status === 'changes';
+    // mergeada ou fechada (só acontece com monitoradas) não pede nada a ninguém
+    const state = pr.state ?? 'OPEN';
+    const open = state === 'OPEN';
+    const pending = open && (status === 'warn' || status === 'changes');
     const botSpokeLast = !!last && last.submittedAt > myLast;
     // O GitHub calcula conflito sob demanda: UNKNOWN mantém o último valor conhecido.
     const known = pr.mergeable !== 'UNKNOWN';
-    const conflict = known ? pr.mergeable === 'CONFLICTING' : !!prev?.conflict;
-    const clean = known ? pr.mergeStateStatus === 'CLEAN' : !!prev?.clean;
+    const conflict = open && (known ? pr.mergeable === 'CONFLICTING' : !!prev?.conflict);
+    const clean = open && (known ? pr.mergeStateStatus === 'CLEAN' : !!prev?.clean);
     return {
         key: `${pr.repository.nameWithOwner}#${pr.number}`,
         url: pr.url,
@@ -71,6 +74,7 @@ export function classify(pr, {me, reviewer, repoPrefix = '', cardPattern = DEFAU
         num: pr.number,
         title: pr.title,
         base: pr.baseRefName,
+        state,
         status,
         reviews: bot.length,
         conflict,
@@ -78,6 +82,8 @@ export function classify(pr, {me, reviewer, repoPrefix = '', cardPattern = DEFAU
         needsReply: pending && botSpokeLast,
         waitingBot: pending && !botSpokeLast,
         ready: status === 'pass' && clean && !conflict,
+        // o GitHub libera o merge (checks, aprovações obrigatórias, sem conflito): é o que vale para o botão
+        canMerge: clean && !conflict,
         since: pending ? (botSpokeLast ? last.submittedAt : myLast) : null,
         card: pr.title.match(new RegExp(cardPattern))?.[0] ?? null,
     };
@@ -136,7 +142,9 @@ export function matchesQuery(p, query) {
     return q.split(/\s+/).every(t => hay.includes(t));
 }
 
-export function counts(items) {
+export function counts(all) {
+    // monitoradas já mergeadas/fechadas aparecem na lista, mas não contam como abertas
+    const items = all.filter(p => !p.state || p.state === 'OPEN');
     return {
         total: items.length,
         reply: items.filter(p => p.needsReply).length,

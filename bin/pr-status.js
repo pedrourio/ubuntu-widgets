@@ -52,10 +52,13 @@ for (const g of groupPrs(shown, cfg, new Set(cfg.extra), view)) {
     print(`\n## ${g.name} (${g.prs.length})`);
     for (const p of g.prs) {
         const flags = [
+            p.state === 'MERGED' && 'MERGED',
+            p.state === 'CLOSED' && 'FECHADA',
             p.needsReply && `sem resposta sua ${relTime(p.since)}`,
             p.waitingBot && `você respondeu ${relTime(p.since)}`,
             p.ready && 'pronta para merge',
             p.conflict && `conflito com ${p.base}`,
+            p.canMerge && 'GitHub libera merge',
         ].filter(Boolean);
         print(`- ${p.repo}#${p.num} [${STATUS[p.status]}, ${p.reviews} review(s) do ${who}]${flags.length ? ` ${flags.join(' · ')}` : ''}`);
         print(`  ${p.title}`);

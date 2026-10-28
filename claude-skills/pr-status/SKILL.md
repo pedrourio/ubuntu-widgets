@@ -29,4 +29,6 @@ A saída começa com uma linha de contadores e depois lista cada PR com `repo#n�
 
 - Comece pela fila de ação (pedem resposta), depois conflitos, depois o resto. Cite `repo#número` com o link.
 - Para detalhar o que o reviewer pediu numa PR, leia o último review dele: `gh api repos/<org>/<repo>/pulls/<n>/reviews --jq '.[-1].body'` e o comentário de review mais recente da PR.
+- Monitoradas mostram `MERGED`/`FECHADA` quando não estão mais abertas; essas não contam nos contadores.
+- `GitHub libera merge` = checks, aprovações obrigatórias e sem conflito. Só faça merge se o usuário pedir, PR a PR: `gh pr merge <n> -R <org>/<repo> --merge` (merge commit; squash não é aceito em todos os repos).
 - Configuração (reviewer, org padrão, grupos) fica em `~/.config/pr-widget/config.json`; não edite sem o usuário pedir.

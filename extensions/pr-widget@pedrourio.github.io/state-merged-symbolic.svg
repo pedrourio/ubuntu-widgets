@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- só preenchimento: o GNOME recolore ícones symbolic pelo fill, traço some -->
+  <path fill="#2e3436" fill-rule="evenodd" d="M4 0.9a2.6 2.6 0 1 1 0 5.2a2.6 2.6 0 1 1 0-5.2zm0 1.6a1 1 0 1 0 0 2a1 1 0 1 0 0-2zM4 9.9a2.6 2.6 0 1 1 0 5.2a2.6 2.6 0 1 1 0-5.2zm0 1.6a1 1 0 1 0 0 2a1 1 0 1 0 0-2zM12 9.9a2.6 2.6 0 1 1 0 5.2a2.6 2.6 0 1 1 0-5.2zm0 1.6a1 1 0 1 0 0 2a1 1 0 1 0 0-2z"/>
+  <path fill="#2e3436" d="M3.2 6.1h1.6v3.8H3.2zM11.2 9.9V7a1.7 1.7 0 0 0-1.7-1.7H8.2V3.7h1.3A3.3 3.3 0 0 1 12.8 7v2.9zM5.6 4.5 8.6 1.9v5.2z"/>
+</svg>

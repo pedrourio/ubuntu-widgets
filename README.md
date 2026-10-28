@@ -51,7 +51,7 @@ Configuração em `~/.config/pr-widget/config.json` (grupos e cores também se e
 }
 ```
 
-O menu tem duas visualizações: **Por status** (monitoradas por você, pedem resposta, aguardando o reviewer, prontas, com conflito, sem review, demais) e **Por grupo** (monitoradas, seus grupos, cards, sem grupo). PRs monitoradas ficam sempre num grupo só delas, no topo; ao adicionar uma, o menu se atualiza na hora e filtra por ela. `viewMode` define qual abre primeiro.
+O menu tem duas visualizações: **Por status** (monitoradas por você, pedem resposta, aguardando o reviewer, prontas, com conflito, sem review, demais) e **Por grupo** (monitoradas, seus grupos, cards, sem grupo). PRs monitoradas ficam sempre num grupo só delas, no topo, com o estado (aberta, merged, fechada); mergeadas e fechadas não contam nos contadores. PRs que o GitHub libera para merge (checks, aprovações e sem conflito), suas ou monitoradas, ganham um botão **Merge** no hover: o primeiro clique pede confirmação, o segundo roda `gh pr merge --merge` (merge commit) e avisa por notificação; ao adicionar uma, o menu se atualiza na hora e filtra por ela. `viewMode` define qual abre primeiro.
 
 A decisão do reviewer vem do review mais recente dele: `CHANGES_REQUESTED`, ou `decision: PASS|WARN` no texto do review.
 

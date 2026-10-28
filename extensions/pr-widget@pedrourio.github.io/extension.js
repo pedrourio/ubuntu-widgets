@@ -18,6 +18,8 @@ const STATUS = {pass: 'PASS', approved: 'aprovada', warn: 'WARN', changes: 'muda
 
 // Estado da PR pela forma do ícone (lê-se sem depender da cor), na ordem de prioridade.
 const STATE = [
+    ['merged', p => p.state === 'MERGED'],
+    ['closed', p => p.state === 'CLOSED'],
     ['reply', p => p.needsReply],
     ['waiting', p => p.waitingBot],
     ['ready', p => p.ready],
@@ -356,7 +358,7 @@ class Indicator extends PanelMenu.Button {
         const row = new St.BoxLayout({style_class: 'prw-row', reactive: true, track_hover: true, can_focus: true});
         const [state] = STATE.find(([, test]) => test(p));
         row.add_child(new St.Icon({
-            gicon: Gio.icon_new_for_string(`${this._ext.path}/state-${state}-symbolic.svg`),
+            gicon: Gio.icon_new_for_string(`${this._ext.path}/state-${state === 'closed' ? 'open' : state}-symbolic.svg`),
             icon_size: 16, style_class: `prw-state prw-state-${state}`, y_align: Clutter.ActorAlign.START,
         }));
 
@@ -373,6 +375,11 @@ class Indicator extends PanelMenu.Button {
             parts.push('você respondeu');
         if (p.conflict)
             parts.push(`<span foreground="#e275ad">${esc(`conflito com ${p.base}`)}</span>`);
+        // monitoradas: sempre dizem se ainda estão abertas
+        if (this._cfg.extra.some(k => k.toLowerCase() === p.key.toLowerCase())) {
+            const [text, color] = {OPEN: ['aberta', '#8ddb8c'], MERGED: ['merged', '#b083f0'], CLOSED: ['fechada', '#8c9bab']}[p.state] ?? ['aberta', '#8ddb8c'];
+            parts.unshift(`<span foreground="${color}"><b>${text}</b></span>`);
+        }
         if (this._justAdded?.key === p.key && Date.now() < this._justAdded.until)
             parts.unshift('<span foreground="#dc8add"><b>nova</b></span>');
         const meta = label('', 'prw-meta');
@@ -410,6 +417,8 @@ class Indicator extends PanelMenu.Button {
             });
         });
         actions.add_child(copy);
+        if (p.canMerge)
+            actions.add_child(this._mergeButton(p));
         row.add_child(actions);
 
         // botões aparecem com o mouse em cima ou com o foco do teclado na linha ou num dos botões
@@ -433,6 +442,71 @@ class Indicator extends PanelMenu.Button {
             }));
         }
         return row;
+    }
+
+    // Merge em dois cliques: o primeiro só pede confirmação (some sozinho em 4 s).
+    _mergeButton(p) {
+        const btn = new St.Button({label: 'Merge', style_class: 'prw-merge', can_focus: true, accessible_name: `Fazer merge da PR ${p.num}`});
+        let armed = null;
+        btn.connect('clicked', () => {
+            if (btn._busy)
+                return;
+            if (!armed) {
+                btn.label = 'Confirmar merge?';
+                btn.add_style_class_name('prw-merge-armed');
+                armed = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 4, () => {
+                    armed = null;
+                    if (btn._alive) {
+                        btn.label = 'Merge';
+                        btn.remove_style_class_name('prw-merge-armed');
+                    }
+                    return GLib.SOURCE_REMOVE;
+                });
+                return;
+            }
+            GLib.source_remove(armed);
+            armed = null;
+            btn._busy = true;
+            btn.label = 'Mergeando…';
+            this._merge(p).then(() => {
+                Main.notify('PR mergeada', `${p.repo} #${p.num}: ${p.title}`);
+                this.refresh();
+            }).catch(e => {
+                Main.notifyError(`Merge de ${p.repo} #${p.num} falhou`, e.message);
+                if (btn._alive) {
+                    btn._busy = false;
+                    btn.label = 'Merge';
+                    btn.remove_style_class_name('prw-merge-armed');
+                }
+            });
+        });
+        btn._alive = true;
+        btn.connect('destroy', () => {
+            btn._alive = false;
+            if (armed)
+                GLib.source_remove(armed);
+        });
+        return btn;
+    }
+
+    // merge commit: único tipo aceito em todos os repositórios; apagar o branch fica com a regra do repo
+    _merge(p) {
+        const [repo, num] = p.key.split('#');
+        return new Promise((resolve, reject) => {
+            const proc = Gio.Subprocess.new([GLib.find_program_in_path('gh') ?? 'gh', 'pr', 'merge', num, '-R', repo, '--merge'],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
+            proc.communicate_utf8_async(null, null, (pr, res) => {
+                try {
+                    const [, , err] = pr.communicate_utf8_finish(res);
+                    if (pr.get_successful())
+                        resolve();
+                    else
+                        reject(new Error(err.trim().split('\n').pop() || 'gh falhou'));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
     }
 
     _footer() {

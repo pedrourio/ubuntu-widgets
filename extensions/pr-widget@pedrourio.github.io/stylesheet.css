@@ -70,3 +70,8 @@
 .prw-view:checked { color: #cdd9e5; font-weight: 600; border-bottom-color: #ec775c; }
 .prw-tab-box { spacing: 6px; }
 .prw-oktext { color: #8ddb8c; font-size: 0.9em; }
+.prw-state-merged { color: #b083f0; }
+.prw-state-closed { color: #636e7b; }
+.prw-merge { padding: 0 12px; height: 30px; border-radius: 6px; background-color: #347d39; color: #ffffff; font-weight: 600; }
+.prw-merge:hover, .prw-merge:focus { background-color: #46954a; }
+.prw-merge-armed, .prw-merge-armed:hover, .prw-merge-armed:focus { background-color: #c69026; color: #1c2128; }

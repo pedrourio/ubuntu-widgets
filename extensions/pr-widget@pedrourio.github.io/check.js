@@ -66,6 +66,19 @@ assert(matchesQuery(sample, 'credêncial cnpj') && matchesQuery(sample, 'backend
 assert(!matchesQuery(sample, 'credencial audiometria'), 'todas as palavras precisam casar');
 print('ok: busca');
 
+// estado da PR e merge liberado
+c = classify(pr([bot('APPROVED', 'PASS', '2026-01-02')], [], '2026-01-01', {state: 'OPEN'}), ctx);
+assert(c.state === 'OPEN' && c.canMerge, 'aberta e CLEAN = dá para mergear');
+c = classify(pr([bot('APPROVED', 'WARN', '2026-01-02')], [], '2026-01-01', {state: 'OPEN'}), ctx);
+assert(c.canMerge && !c.ready, 'monitorada de outra pessoa: merge segue o GitHub (CLEAN), não o PASS do reviewer');
+c = classify(pr([bot('APPROVED', 'PASS', '2026-01-02')], [], '2026-01-01', {state: 'OPEN', mergeStateStatus: 'BLOCKED'}), ctx);
+assert(!c.canMerge, 'bloqueada pelo GitHub = sem merge');
+c = classify(pr([bot('APPROVED', 'WARN', '2026-01-02')], [], '2026-01-01', {state: 'MERGED', mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN'}), ctx, {conflict: true, clean: true});
+assert(c.state === 'MERGED' && !c.canMerge && !c.needsReply && !c.waitingBot && !c.ready && !c.conflict, 'mergeada não pede nada nem conta como pendência');
+assert(counts([c]).reply === 0 && counts([c]).conflict === 0 && counts([c]).total === 0 && counts([c]).noReview === 0, 'mergeada fora dos contadores');
+c = classify(pr([], [], '2026-01-01'), ctx);
+assert(c.state === 'OPEN', 'sem state no dado = aberta (consultas antigas)');
+
 // PRs de um card (usado pelo jira-widget)
 const cq = buildCardPrQuery('ACME-1', 'Org');
 assert(cq.includes('ACME-1 in:title org:Org is:pr') && cq.includes('...P') && cq.includes('viewer { login }'), 'consulta de PRs do card');
