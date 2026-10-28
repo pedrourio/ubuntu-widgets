@@ -94,8 +94,11 @@ export const VIEWS = {status: 'Por status', group: 'Por grupo'};
 export function groupPrs(items, cfg, extraKeys, view = 'status') {
     const used = new Set();
     const take = pred => items.filter(p => !used.has(p.key) && pred(p)).map(p => (used.add(p.key), p));
+    // PRs que você pediu para monitorar ficam num grupo só delas, no topo, nas duas visões
+    const extra = {id: 'extra', name: 'Monitoradas por você', color: '#dc8add', prs: take(p => extraKeys.has(p.key))};
     if (view === 'status') {
         return [
+            extra,
             {id: 'reply', name: 'Pedem sua resposta', color: '#ff7b63', prs: take(p => p.needsReply)},
             {id: 'waiting', name: `Aguardando ${cfg.reviewerName ?? 'reviewer'}`, color: '#ffa348', prs: take(p => p.waitingBot)},
             {id: 'ready', name: 'Prontas para merge', color: '#57e389', prs: take(p => p.ready), note: 'PASS e sem conflito'},
@@ -104,10 +107,9 @@ export function groupPrs(items, cfg, extraKeys, view = 'status') {
             {id: 'others', name: 'Demais', color: '#77767b', prs: take(() => true), note: 'aprovadas, aguardando checks ou merge'},
         ].filter(g => g.prs.length);
     }
-    const groups = [];
+    const groups = [extra];
     for (const g of cfg.groups)
         groups.push({id: g.id, name: g.name, color: g.color, prs: take(p => cfg.assign[p.key] === g.id)});
-    groups.push({id: 'extra', name: 'Monitoradas por você', color: '#dc8add', prs: take(p => extraKeys.has(p.key))});
     if (cfg.autoGroupByCard) {
         const byCard = new Map();
         for (const p of items.filter(p => !used.has(p.key) && p.card))

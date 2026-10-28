@@ -69,3 +69,4 @@
 .prw-view:hover, .prw-view:focus { color: #adbac7; }
 .prw-view:checked { color: #cdd9e5; font-weight: 600; border-bottom-color: #ec775c; }
 .prw-tab-box { spacing: 6px; }
+.prw-oktext { color: #8ddb8c; font-size: 0.9em; }

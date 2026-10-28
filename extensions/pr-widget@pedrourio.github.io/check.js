@@ -45,6 +45,10 @@ const cfgG = {groups: [{id: 'g', name: 'G', color: '#fff'}], assign: {f: 'g', a:
 const ids = view => groupPrs(items, cfgG, new Set(), view).map(g => `${g.id}:${g.prs.map(p => p.key).join('')}`).join(' ');
 assert(ids('status') === 'reply:a waiting:c ready:b conflict:d noreview:e others:f', `visão por status (${ids('status')})`);
 assert(ids('group') === 'g:af card-MLK-2:cd nogroup:be', `visão por grupo ignora status (${ids('group')})`);
+// monitoradas ficam num grupo só delas, no topo, nas duas visões (mesmo com status ou grupo próprio)
+const idsX = view => groupPrs(items, cfgG, new Set(['a', 'c']), view).map(g => `${g.id}:${g.prs.map(p => p.key).join('')}`).join(' ');
+assert(idsX('status') === 'extra:ac ready:b conflict:d noreview:e others:f', `monitoradas na visão por status (${idsX('status')})`);
+assert(idsX('group') === 'extra:ac g:f nogroup:bde', `monitoradas na visão por grupo (${idsX('group')})`);
 assert(counts([{needsReply: true, status: 'warn'}, {status: 'none'}]).noReview === 1, 'contagem');
 
 print('ok: todas as regras passaram');

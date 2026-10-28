@@ -18,6 +18,7 @@ A saída começa com uma linha de contadores e depois lista cada PR com `repo#n�
 
 ## Como ler
 
+- **Monitoradas por você**: PRs de outras pessoas que o usuário pediu para acompanhar (`extra` no config). Ficam sempre nesta seção, no topo, fora das seções de status.
 - **Pedem sua resposta**: o reviewer deu WARN ou pediu mudanças e falou depois do último commit ou comentário do usuário. É a fila de ação.
 - **Aguardando <reviewer>**: o usuário já respondeu e falta o reviewer revisar de novo.
 - **Prontas para merge**: decisão PASS e o GitHub libera o merge.

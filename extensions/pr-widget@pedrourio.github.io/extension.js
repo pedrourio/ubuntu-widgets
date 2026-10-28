@@ -86,6 +86,12 @@ class Indicator extends PanelMenu.Button {
         this._monitor.connect('changed', (_m, _f, _o, event) => {
             if (event !== Gio.FileMonitorEvent.CHANGES_DONE_HINT && event !== Gio.FileMonitorEvent.CREATED)
                 return;
+            // salvamento do próprio menu (monitorar PR) já disparou a consulta
+            if (this._selfSave) {
+                this._selfSave = false;
+                this._cfg = loadConfig();
+                return;
+            }
             // Junta salvamentos seguidos (ex.: arrastar o seletor de cor) numa consulta só.
             if (this._debounce)
                 GLib.source_remove(this._debounce);
@@ -129,7 +135,7 @@ class Indicator extends PanelMenu.Button {
         this._busy = true;
         try {
             const proc = Gio.Subprocess.new(
-                [gh, 'api', 'graphql', '-f', `query=${buildQuery(this._cfg.extra)}`],
+                [gh, 'api', 'graphql', '-f', `query=${buildQuery(this._queried = [...this._cfg.extra])}`],
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
             proc.communicate_utf8_async(null, null, (p, res) => {
                 if (this._destroyed)
@@ -170,14 +176,43 @@ class Indicator extends PanelMenu.Button {
         this._updatedAt = Date.now();
         writeJson(CACHE_PATH, this._items.map(p => ({key: p.key, title: p.title})));
         this._updatePill();
-        this._renderWhenClosed();
+        // consulta que já estava rodando quando a PR foi adicionada: não tem a PR nova, pergunta de novo
+        if (this._adding && !this._queried.includes(this._adding)) {
+            this.refresh();
+            return;
+        }
+        if (this._adding)
+            this._finishAdd();
+        else
+            this._renderWhenClosed();
+    }
+
+    // PR recém-adicionada: aviso no rodapé, busca preenchida com o número e etiqueta "nova" na linha.
+    _finishAdd() {
+        const key = this._adding;
+        this._adding = null;
+        const p = this._items.find(i => i.key.toLowerCase() === key.toLowerCase());
+        if (p) {
+            this._justAdded = {key: p.key, until: Date.now() + 10e3};
+            this._addNotice = {text: `Adicionada: ${p.repo} #${p.num}. Limpe a busca para ver todas.`, cls: 'prw-oktext'};
+            this._query = String(p.num);
+        } else {
+            this._addNotice = {text: `Não encontrei ${key}${this._error ? `: ${this._error}` : ''}. Confira o número e se você tem acesso ao repositório.`, cls: 'prw-errortext'};
+        }
+        // aberto ou não: quem pediu está olhando o menu agora
+        this._render();
+        if (this.menu.isOpen)
+            this._search.grab_key_focus();
     }
 
     _fail(message) {
         this._busy = false;
         this._error = message;
         this._updatePill();
-        this._renderWhenClosed();
+        if (this._adding)
+            this._finishAdd();
+        else
+            this._renderWhenClosed();
     }
 
     _updatePill() {
@@ -338,6 +373,8 @@ class Indicator extends PanelMenu.Button {
             parts.push('você respondeu');
         if (p.conflict)
             parts.push(`<span foreground="#e275ad">${esc(`conflito com ${p.base}`)}</span>`);
+        if (this._justAdded?.key === p.key && Date.now() < this._justAdded.until)
+            parts.unshift('<span foreground="#dc8add"><b>nova</b></span>');
         const meta = label('', 'prw-meta');
         meta.clutter_text.set_markup(parts.join(' · '));
         meta.clutter_text.line_wrap = true;
@@ -410,12 +447,21 @@ class Indicator extends PanelMenu.Button {
                 error.visible = true;
                 return;
             }
-            if (!this._cfg.extra.includes(key)) {
-                this._cfg.extra = [...this._cfg.extra, key];
-                saveConfig(this._cfg); // o monitor do arquivo dispara a atualização
-            }
             entry.text = '';
             error.visible = false;
+            if (this._cfg.extra.some(k => k.toLowerCase() === key.toLowerCase())) {
+                this._adding = key;
+                this._finishAdd(); // já monitorada: só mostra onde está
+                return;
+            }
+            this._cfg.extra = [...this._cfg.extra, key];
+            this._selfSave = true;
+            saveConfig(this._cfg);
+            this._adding = key;
+            notice.text = `Adicionando ${key}…`;
+            notice.style_class = 'prw-muted';
+            notice.visible = true;
+            this.refresh();
         };
         entry.clutter_text.connect('activate', add);
         const btn = new St.Button({label: 'Adicionar', style_class: 'prw-primary', can_focus: true});
@@ -424,6 +470,10 @@ class Indicator extends PanelMenu.Button {
         line.add_child(btn);
         box.add_child(line);
         box.add_child(error);
+        const notice = label(this._addNotice?.text ?? '', this._addNotice?.cls ?? 'prw-muted', {visible: Boolean(this._addNotice)});
+        notice.clutter_text.line_wrap = true;
+        this._addNotice = null; // aparece uma vez
+        box.add_child(notice);
         const org = new St.Button({label: 'Organizar grupos e cores', style_class: 'prw-link', x_align: Clutter.ActorAlign.START, can_focus: true});
         org.connect('clicked', () => {
             this.menu.close();

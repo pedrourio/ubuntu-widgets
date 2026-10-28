@@ -51,7 +51,7 @@ Configuração em `~/.config/pr-widget/config.json` (grupos e cores também se e
 }
 ```
 
-O menu tem duas visualizações: **Por status** (pedem resposta, aguardando o reviewer, prontas, com conflito, sem review, demais) e **Por grupo** (seus grupos, monitoradas, cards, sem grupo). `viewMode` define qual abre primeiro.
+O menu tem duas visualizações: **Por status** (monitoradas por você, pedem resposta, aguardando o reviewer, prontas, com conflito, sem review, demais) e **Por grupo** (monitoradas, seus grupos, cards, sem grupo). PRs monitoradas ficam sempre num grupo só delas, no topo; ao adicionar uma, o menu se atualiza na hora e filtra por ela. `viewMode` define qual abre primeiro.
 
 A decisão do reviewer vem do review mais recente dele: `CHANGES_REQUESTED`, ou `decision: PASS|WARN` no texto do review.
 
