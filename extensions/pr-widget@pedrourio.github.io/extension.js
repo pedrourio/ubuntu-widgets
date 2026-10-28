@@ -4,6 +4,8 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import Pango from 'gi://Pango';
+import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
@@ -70,7 +72,12 @@ class Indicator extends PanelMenu.Button {
             else if (open)
                 this._syncUpdated();
             if (open)
-                this._search.grab_key_focus(); // já dá para digitar ao abrir
+                // já dá para digitar ao abrir; no idle, depois do foco que o menu põe no primeiro item
+                GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                    if (this.menu.isOpen && this._search.get_stage())
+                        this._search.grab_key_focus();
+                    return GLib.SOURCE_REMOVE;
+                });
             else
                 this._search.text = '';
         });
@@ -442,9 +449,13 @@ export default class PrWidgetExtension extends Extension {
         this._indicator = new Indicator(this);
         // depois do Spotify (1) e dos fones (2)
         Main.panel.addToStatusArea(this.uuid, this._indicator, 3, 'left');
+        // Super+G: abre (ou fecha) o menu; o foco vai para a busca ao abrir
+        Main.wm.addKeybinding('open-shortcut', this.getSettings(), Meta.KeyBindingFlags.NONE,
+            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this._indicator.menu.toggle());
     }
 
     disable() {
+        Main.wm.removeKeybinding('open-shortcut');
         this._indicator.destroy();
         this._indicator = null;
     }

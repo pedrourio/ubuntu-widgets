@@ -2,5 +2,8 @@
   "uuid": "pr-widget@pedrourio.github.io",
   "name": "PRs abertas",
   "description": "Suas PRs abertas na barra do topo, com o status do reviewer autônomo, conflitos e prontas para merge.",
-  "shell-version": ["50"]
+  "shell-version": [
+    "50"
+  ],
+  "settings-schema": "org.gnome.shell.extensions.pr-widget"
 }

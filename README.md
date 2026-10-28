@@ -29,6 +29,8 @@ O GNOME guarda os módulos já importados pelo caminho do arquivo e só barra a 
 
 ## pr-widget
 
+`Super+G` abre o menu com o cursor na busca (muda em `org.gnome.shell.extensions.pr-widget open-shortcut`).
+
 Requer o [`gh`](https://cli.github.com/) autenticado. Uma consulta GraphQL a cada `intervalMinutes`.
 
 Configuração em `~/.config/pr-widget/config.json` (grupos e cores também se editam em **Organizar grupos e cores**, no menu):

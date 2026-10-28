@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.pr-widget" path="/org/gnome/shell/extensions/pr-widget/">
+    <key name="open-shortcut" type="as">
+      <default><![CDATA[['<Super>g']]]></default>
+      <summary>Atalho que abre o menu de PRs com o foco na busca</summary>
+    </key>
+  </schema>
+</schemalist>
