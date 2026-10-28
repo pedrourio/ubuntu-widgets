@@ -54,6 +54,9 @@ assert(s.total === 8 && s.points[0].t === 10 * H && s.points[0].remaining === 8,
 assert(s.points.map(p => p.remaining).join() === '8,3,5,2,2', `repassa eventos: ${s.points.map(p => p.remaining)}`);
 assert(s.points.at(-1).t === 16 * H, 'termina em agora');
 assert(s.ideal[0].remaining === 8 && s.ideal[1].remaining === 0 && s.ideal[1].t === 20 * H, 'diretriz até zero no fim');
+const c = burndownSeries(raw, 'cards');
+assert(c.total === 2 && c.points.map(p => p.remaining).join() === '2,1,2,1,1', `por cards: ${c.points.map(p => p.remaining)}`);
+assert(c.unit === 'cards' && s.unit === 'points', 'unidade vai junto com a série');
 assert(burndownSeries({}) === null && burndownSeries(null) === null, 'formato inválido');
 ok('burndown');
 

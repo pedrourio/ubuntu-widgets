@@ -50,13 +50,14 @@ export function toJql(query, project, epicKeys = []) {
 export const epicJql = (query, project) => `project = ${project} AND issuetype = Epic AND summary ~ ${quote(query.trim())}`;
 
 // Repassa os eventos do relatório de burndown do Jira (scopechangeburndownchart):
-// restante = soma dos pontos dos cards no escopo e ainda não concluídos.
-export function burndownSeries(raw) {
+// restante = cards (ou pontos) no escopo e ainda não concluídos.
+export function burndownSeries(raw, unit = 'points') {
     if (!raw?.changes || !raw.startTime || !raw.endTime)
         return null;
     const issues = new Map();
     const get = k => issues.get(k) ?? issues.set(k, {pts: 0, in: false, done: false}).get(k);
-    const remaining = () => [...issues.values()].reduce((sum, i) => sum + (i.in && !i.done ? i.pts : 0), 0);
+    const weight = i => unit === 'cards' ? 1 : i.pts;
+    const remaining = () => [...issues.values()].reduce((sum, i) => sum + (i.in && !i.done ? weight(i) : 0), 0);
     const apply = ev => {
         const i = get(ev.key);
         if (ev.statC && 'newValue' in ev.statC)
@@ -79,7 +80,7 @@ export function burndownSeries(raw) {
         points.push({t, remaining: remaining()});
     }
     points.push({t: end, remaining: remaining()});
-    return {total, points, ideal: [{t: raw.startTime, remaining: total}, {t: raw.endTime, remaining: 0}]};
+    return {unit, total, points, ideal: [{t: raw.startTime, remaining: total}, {t: raw.endTime, remaining: 0}]};
 }
 
 export const attachmentUrl = (site, att) => `${site}/secure/attachment/${att.id}/${encodeURIComponent(att.filename)}`;

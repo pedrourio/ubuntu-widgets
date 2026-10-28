@@ -3,10 +3,10 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
+import Clutter from 'gi://Clutter';
 import {draw, W, H} from './draw.js';
 
-const PERIOD = 3000; // ms
-const FRAME = 50; // ms (~20 fps): suave o bastante e barato
+const PERIOD = 3200; // ms por ciclo da onda
 
 export const Burndown = GObject.registerClass({GTypeName: `JwBurndown_${GLib.compute_checksum_for_string(GLib.ChecksumType.MD5, import.meta.url, -1)}`},
 class Burndown extends St.DrawingArea {
@@ -23,21 +23,21 @@ class Burndown extends St.DrawingArea {
         this.queue_repaint();
     }
 
+    // Quadros no ritmo da tela (Clutter.Timeline): fluido, e só existe com o menu aberto.
     start() {
-        if (this._tick || !this._series || !this._anim.get_boolean('enable-animations'))
+        if (this._timeline || !this._series || !this._anim.get_boolean('enable-animations'))
             return;
-        const t0 = Date.now();
-        this._tick = GLib.timeout_add(GLib.PRIORITY_DEFAULT_IDLE, FRAME, () => {
-            this._phase = ((Date.now() - t0) % PERIOD) / PERIOD * 2 * Math.PI;
+        this._timeline = new Clutter.Timeline({actor: this, duration: PERIOD, repeat_count: -1});
+        this._timeline.connect('new-frame', (_t, msecs) => {
+            this._phase = msecs / PERIOD * 2 * Math.PI;
             this.queue_repaint();
-            return GLib.SOURCE_CONTINUE;
         });
+        this._timeline.start();
     }
 
     stop() {
-        if (this._tick)
-            GLib.source_remove(this._tick);
-        this._tick = null;
+        this._timeline?.stop();
+        this._timeline = null;
     }
 
     vfunc_repaint() {

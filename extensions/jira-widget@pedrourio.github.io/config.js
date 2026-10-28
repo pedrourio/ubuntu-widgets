@@ -11,6 +11,7 @@ const DEFAULTS = {
     project: '',
     githubOwner: '',
     intervalMinutes: 15,
+    burndownUnit: 'cards', // 'cards' ou 'points'
     pointsField: '', // campo de Story Points do site (customfield_…); vazio = burndown pelo padrão do Jira
 };
 

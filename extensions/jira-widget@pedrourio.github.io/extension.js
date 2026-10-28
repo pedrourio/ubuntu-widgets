@@ -187,7 +187,7 @@ class Indicator extends PanelMenu.Button {
                     const params = {rapidViewId: this._cfg.boardId, sprintId: s.sprint.id};
                     if (this._cfg.pointsField)
                         params.statisticFieldId = `field_${this._cfg.pointsField}`;
-                    s.burndown = burndownSeries(await c.request('/rest/greenhopper/1.0/rapid/charts/scopechangeburndownchart', params));
+                    s.burndown = burndownSeries(await c.request('/rest/greenhopper/1.0/rapid/charts/scopechangeburndownchart', params), this._cfg.burndownUnit);
                 } catch {
                     s.burndown = null;
                 }
@@ -276,7 +276,7 @@ class Indicator extends PanelMenu.Button {
         this._burndownBox = new St.BoxLayout({vertical: true, style_class: 'jw-block'});
         const bdHead = new St.BoxLayout();
         bdHead.add_child(label('Gráfico de burndown', 'jw-block-title', {x_expand: true}));
-        bdHead.add_child(label('Story Points', 'jw-muted'));
+        bdHead.add_child(label(this._state.burndown?.unit === 'points' ? 'Story Points' : 'Cards', 'jw-muted'));
         this._burndownBox.add_child(bdHead);
         this._chart = null;
         if (this._state.burndown) {
