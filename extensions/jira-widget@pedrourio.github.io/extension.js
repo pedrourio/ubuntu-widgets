@@ -54,6 +54,7 @@ class Indicator extends PanelMenu.Button {
         super._init(0.0, 'Jira', false);
         this._ext = ext;
         this._cfg = loadConfig();
+        this._prCache = new Map();
         // Barra aparece com o último valor conhecido antes de qualquer rede.
         this._state = {sprint: null, counts: null, burndown: null, error: null, updatedAt: null, me: null, board: null, boardAt: 0, ...readJson(CACHE_PATH, {})};
         this._state.error = null;
@@ -79,14 +80,29 @@ class Indicator extends PanelMenu.Button {
             if (open && this._dirty)
                 this._render();
             if (open) {
-                this._search.grab_key_focus();
+                // depois do foco que o próprio menu põe no primeiro item ao abrir
+                GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                    if (this.menu.isOpen && this._search.get_stage()) {
+                        this._search.grab_key_focus();
+                        this._search.clutter_text.set_cursor_position(-1);
+                    }
+                    return GLib.SOURCE_REMOVE;
+                });
+                // última busca salva, mas sem resultado na memória (ex.: depois do login)
+                if (this._pendingSearch) {
+                    this._pendingSearch = false;
+                    this._runSearch(this._search.text);
+                } else if (this._pendingPrRow) {
+                    this._openCard(this._pendingPrRow);
+                }
                 // anima só aberto e com o gráfico à vista
                 if (this._burndownBox.visible)
                     this._chart?.start();
             } else {
+                // a busca fica: reabrir mostra o mesmo texto e os mesmos resultados, sem consultar
                 this._chart?.stop();
-                this._search.text = '';
                 this._searchCancel?.cancel();
+                this._prCancel?.cancel();
             }
         });
 
@@ -179,8 +195,8 @@ class Indicator extends PanelMenu.Button {
             }
             s.error = null;
             s.updatedAt = Date.now();
-            const {error: _e, ...persist} = s;
-            writeJson(CACHE_PATH, persist);
+            this._prCache.clear();
+            this._persist();
         } catch (e) {
             s.error = e.kind ?? (e.status === 401 || e.status === 403 ? 'auth' : 'net');
         } finally {
@@ -249,7 +265,8 @@ class Indicator extends PanelMenu.Button {
 
         const field = new St.BoxLayout({style_class: 'jw-search-box'});
         field.add_child(new St.Icon({icon_name: 'edit-find-symbolic', icon_size: 16, style_class: 'jw-muted', y_align: Clutter.ActorAlign.CENTER}));
-        this._search = new St.Entry({hint_text: `Pesquisar por ${this._cfg.project || 'PROJ'}-123, título ou épico`, can_focus: true, x_expand: true, style_class: 'jw-search'});
+        this._search = new St.Entry({hint_text: `Pesquisar por ${this._cfg.project || 'PROJ'}-123, título ou épico`, can_focus: true, x_expand: true, style_class: 'jw-search',
+            text: this._state.lastQuery ?? ''});
         this._search.clutter_text.connect('text-changed', () => this._queueSearch());
         field.add_child(this._search);
         content.add_child(field);
@@ -275,6 +292,24 @@ class Indicator extends PanelMenu.Button {
         const scroll = new St.ScrollView({style_class: 'jw-scroll', hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC});
         scroll.set_child(this._results);
         content.add_child(scroll);
+        this._restoreSearch();
+    }
+
+    // Redesenho (ciclo de 15 min, login) mantém a busca: da memória se der, senão busca ao abrir.
+    _restoreSearch() {
+        const q = this._search.text;
+        if (!q.trim())
+            return;
+        this._burndownBox.visible = false;
+        if (this._lastResult?.q === q)
+            this._showRows(this._lastResult.issues);
+        else
+            this._pendingSearch = true;
+    }
+
+    _persist() {
+        const {error: _e, ...persist} = this._state;
+        writeJson(CACHE_PATH, persist);
     }
 
     _openPrefs() {
@@ -297,6 +332,12 @@ class Indicator extends PanelMenu.Button {
             this._searchCancel?.cancel();
             this._results.destroy_all_children();
             this._status.visible = false;
+            this._lastResult = null;
+            this._pendingSearch = false;
+            if (this._state.lastQuery) {
+                this._state.lastQuery = '';
+                this._persist();
+            }
             return;
         }
         this._searchTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 400, () => {
@@ -322,12 +363,10 @@ class Indicator extends PanelMenu.Button {
             const r = await this._client.request('/rest/api/3/search/jql', {jql: jq.jql, fields: FIELDS, maxResults: 10}, cancel);
             if (cancel.is_cancelled())
                 return;
-            this._results.destroy_all_children();
-            this._rows = r.issues.map(issue => ({issue, box: new St.BoxLayout({vertical: true, style_class: 'jw-result'})}));
-            for (const row of this._rows)
-                this._results.add_child(row.box);
-            this._rows.forEach((row, i) => this._fillRow(row, i === 0));
-            this._showStatus(r.issues.length ? '' : 'Nenhum card encontrado.');
+            this._lastResult = {q, issues: r.issues};
+            this._state.lastQuery = q;
+            this._persist();
+            this._showRows(r.issues);
         } catch (e) {
             if (cancel.is_cancelled() || this._destroyed)
                 return;
@@ -339,6 +378,15 @@ class Indicator extends PanelMenu.Button {
             }
             this._showStatus(ERRORS[e.kind ?? (e.status === 401 || e.status === 403 ? 'auth' : 'net')]);
         }
+    }
+
+    _showRows(issues) {
+        this._results.destroy_all_children();
+        this._rows = issues.map(issue => ({issue, box: new St.BoxLayout({vertical: true, style_class: 'jw-result'})}));
+        for (const row of this._rows)
+            this._results.add_child(row.box);
+        this._rows.forEach((row, i) => this._fillRow(row, i === 0));
+        this._showStatus(issues.length ? '' : 'Nenhum card encontrado.');
     }
 
     _showStatus(text) {
@@ -417,11 +465,14 @@ class Indicator extends PanelMenu.Button {
             St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, this._browse(row.issue.key));
             copy.label = 'Copiado';
             GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1600, () => {
-                if (!this._destroyed && copy.get_stage())
+                // o card pode ter sido redesenhado nesse meio tempo (botão já destruído)
+                if (copy._alive)
                     copy.label = 'Copiar link';
                 return GLib.SOURCE_REMOVE;
             });
         });
+        copy._alive = true;
+        copy.connect('destroy', () => (copy._alive = false));
         row.actions.add_child(copy);
         card.add_child(row.actions);
         row.box.add_child(card);
@@ -439,13 +490,22 @@ class Indicator extends PanelMenu.Button {
 
     // PRs só deste card, só quando ele abre; a busca anterior de PRs é cancelada.
     async _openCard(row) {
+        // redesenho com o menu fechado (ciclo de 15 min): PRs só quando abrir
+        if (!this.menu.isOpen) {
+            this._pendingPrRow = row;
+            return;
+        }
+        this._pendingPrRow = null;
         this._prCancel?.cancel();
         const cancel = this._prCancel = new Gio.Cancellable();
         const dev = row.dev;
         let prs;
         try {
-            prs = await fetchCardPrs(row.issue.key, this._cfg.githubOwner, cancel);
+            const prDir = Main.extensionManager.lookup('pr-widget@pedrourio.github.io')?.path;
+            prs = this._prCache.get(row.issue.key) ?? await fetchCardPrs(row.issue.key, this._cfg.githubOwner, cancel, prDir);
+            this._prCache.set(row.issue.key, prs);
         } catch (e) {
+            console.error(`jira-widget: PRs de ${row.issue.key}: ${e.message}`);
             if (cancel.is_cancelled() || !dev.get_stage())
                 return;
             dev.destroy_all_children();

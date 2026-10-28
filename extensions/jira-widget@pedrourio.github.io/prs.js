@@ -3,15 +3,23 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
-const PR_WIDGET = `file://${GLib.build_filenamev([GLib.get_user_data_dir(), 'gnome-shell', 'extensions', 'pr-widget@pedrourio.github.io'])}`;
+// Fora do shell (testes) usa o caminho instalado; dentro, a pasta da cópia que está carregada agora:
+// o shell guarda módulos pelo caminho, e o instalado ficou na versão do login.
+const INSTALLED = GLib.build_filenamev([GLib.get_user_data_dir(), 'gnome-shell', 'extensions', 'pr-widget@pedrourio.github.io']);
 const STATUS = {pass: 'PASS', approved: 'aprovada', warn: 'WARN', changes: 'mudanças pedidas', none: 'sem review'};
 
-let prWidget = null;
-const loadPrWidget = async () => {
-    prWidget ??= Promise.all([import(`${PR_WIDGET}/logic.js`), import(`${PR_WIDGET}/config.js`)])
-        .then(([logic, config]) => ({...logic, cfg: config.loadConfig()}))
-        .catch(() => null);
-    return prWidget;
+const loaded = new Map();
+const loadPrWidget = dir => {
+    if (!loaded.has(dir)) {
+        loaded.set(dir, Promise.all([import(`file://${dir}/logic.js`), import(`file://${dir}/config.js`)])
+            .then(([logic, config]) => ({...logic, cfg: config.loadConfig()}))
+            .catch(e => {
+                console.error(`jira-widget: não consegui importar o pr-widget de ${dir}: ${e}`);
+                loaded.delete(dir); // tenta de novo no próximo card
+                return null;
+            }));
+    }
+    return loaded.get(dir);
 };
 
 function gh(argv, cancellable) {
@@ -37,8 +45,8 @@ function gh(argv, cancellable) {
 }
 
 // → [{repo, num, url, state, text}]; `text` já vem no formato da linha (ex.: "aberta · WARN · sua vez").
-export async function fetchCardPrs(key, owner, cancellable) {
-    const pw = await loadPrWidget();
+export async function fetchCardPrs(key, owner, cancellable, prWidgetDir = INSTALLED) {
+    const pw = await loadPrWidget(prWidgetDir);
     if (!pw)
         throw new Error('pr-widget não instalado');
     const data = await gh(['api', 'graphql', '-f', `query=${pw.buildCardPrQuery(key, owner)}`], cancellable);
