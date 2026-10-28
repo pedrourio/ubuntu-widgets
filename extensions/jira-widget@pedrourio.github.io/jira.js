@@ -18,7 +18,16 @@ export class JiraClient {
     // GET com query string; resolve o JSON. A mensagem de erro nunca leva o token.
     request(path, params = {}, cancellable = null) {
         const qs = Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
-        const msg = Soup.Message.new('GET', `${this._site}${path}${qs ? `?${qs}` : ''}`);
+        return this._send(Soup.Message.new('GET', `${this._site}${path}${qs ? `?${qs}` : ''}`), path, cancellable);
+    }
+
+    post(path, body, cancellable = null) {
+        const msg = Soup.Message.new('POST', `${this._site}${path}`);
+        msg.set_request_body_from_bytes('application/json', new GLib.Bytes(new TextEncoder().encode(JSON.stringify(body))));
+        return this._send(msg, path, cancellable);
+    }
+
+    _send(msg, path, cancellable) {
         msg.request_headers.append('Authorization', this._auth);
         msg.request_headers.append('Accept', 'application/json');
         return new Promise((resolve, reject) => {

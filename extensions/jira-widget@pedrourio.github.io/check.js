@@ -1,5 +1,5 @@
 // gjs -m check.js  → falha com exceção se alguma regra de logic.js quebrar.
-import {COLUMNS, columnMap, tally, pickActiveSprint, daysLeft, toJql, epicJql, burndownSeries, attachmentUrl, initials} from './logic.js';
+import {COLUMNS, columnMap, tally, pickActiveSprint, daysLeft, toJql, epicJql, burndownSeries, attachmentUrl, initials, parseChangelogs, kpis} from './logic.js';
 
 const assert = (cond, msg) => {
     if (!cond)
@@ -40,6 +40,7 @@ ok('sprint');
 
 // burndown: pontos 5+3 no início, A conclui no meio, C entra depois do início com 2
 const H = 3600e3;
+const DAYMS = 86400e3;
 const raw = {
     startTime: 10 * H, endTime: 20 * H, now: 16 * H,
     changes: {
@@ -63,3 +64,25 @@ ok('burndown');
 assert(attachmentUrl('https://acme.atlassian.net', {id: '7', filename: 'AJUSTES PCA.xlsx'}) === 'https://acme.atlassian.net/secure/attachment/7/AJUSTES%20PCA.xlsx', 'url do anexo');
 assert(initials('Pedro Henrique Urio') === 'PU' && initials('Ana') === 'A' && initials('') === '?' && initials(null) === '?', 'iniciais');
 ok('anexo e iniciais');
+
+// KPIs: estágios de entrega, horas por coluna, parados, você × média do time
+const st = i => String(100 + COLUMNS.indexOf(i)); // id de status da coluna, no board de teste
+const card = (id, who, col) => ({id, key: `ACME-${id}`, fields: {status: {id: st(col)}, assignee: {accountId: who}}});
+const bulk = {issueChangeLogs: [
+    {issueId: '1', changeHistories: [{created: 12 * H, items: [{fieldId: 'status', to: st('ready')}]}, {created: 11 * H, items: [{fieldId: 'status', to: st('progress')}]}]},
+    {issueId: '2', changeHistories: [{created: 15 * H, items: [{fieldId: 'status', to: st('done')}, {fieldId: 'assignee', to: 'x'}]}]},
+    {issueId: '3', changeHistories: [{created: 12 * H, items: [{fieldId: 'status', to: st('deploy')}]}]},
+    {issueId: '4', changeHistories: [{created: 10 * H, items: [{fieldId: 'status', to: st('progress')}]}]},
+]};
+const hist = parseChangelogs(bulk);
+assert(hist.get('1').map(([t]) => t / H).join() === '11,12' && hist.get('2').length === 1, 'histórico ordenado, só status');
+const sprintIssues = [card('1', 'eu', 'ready'), card('2', 'eu', 'done'), card('3', 'a', 'deploy'), card('4', 'b', 'progress'), card('5', 'fora', 'done')];
+const k = kpis(sprintIssues, hist, map, {start: 10 * H, now: 16 * H + 2 * DAYMS}, 'eu', ['a', 'b']);
+assert(k.me.n === 2 && k.me.posdev === 2 && k.me.pronto === 1 && k.me.done === 1, `estágios meus: ${JSON.stringify(k.me)}`);
+assert(k.team.posdev === 0.5 && k.team.pronto === 0.5 && k.team.done === 0, `estágios do time são média de proporções: ${JSON.stringify(k.team)}`);
+assert(Math.abs(k.me.hours.progress - 0.5) < 1e-9, `horas em progress por card: ${k.me.hours.progress}`); // 1 h / 2 cards
+assert(k.me.hours.ready > 24 && k.team.hours.progress > 24, 'card ainda na coluna conta até agora');
+assert(k.me.stale.join() === 'ACME-1' && k.teamStale === 1, `parados > 2 dias: ${k.me.stale} / ${k.teamStale}`);
+assert(k.worst?.col === 'ready', `coluna mais acima do time: ${JSON.stringify(k.worst)}`);
+assert(kpis(sprintIssues, hist, map, {start: 10 * H, now: 16 * H}, 'eu', []).team === null, 'sem time, sem comparação');
+ok('kpis');

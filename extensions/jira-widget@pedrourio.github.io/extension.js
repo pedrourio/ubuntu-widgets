@@ -10,7 +10,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
-import {COLUMNS, columnMap, tally, pickActiveSprint, burndownSeries, daysLeft, toJql, epicJql, attachmentUrl, initials} from './logic.js';
+import {COLUMNS, columnMap, tally, pickActiveSprint, burndownSeries, daysLeft, toJql, epicJql, attachmentUrl, initials, parseChangelogs, kpis} from './logic.js';
 import {loadConfig, readJson, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 import {lookupToken} from './secret.js';
 import {JiraClient} from './jira.js';
@@ -180,8 +180,23 @@ class Indicator extends PanelMenu.Button {
             }
             s.sprint = pickActiveSprint((await c.request(`/rest/agile/1.0/board/${this._cfg.boardId}/sprint`, {state: 'active'})).values);
             if (s.sprint) {
+                const colMap = columnMap(s.board);
                 const mine = await this._pages(`sprint = ${s.sprint.id} AND assignee = currentUser()`, 'status,assignee');
-                s.counts = tally(mine, columnMap(s.board), s.me);
+                s.counts = tally(mine, colMap, s.me);
+                // KPIs: cards da sprint de todo mundo + histórico de status numa chamada só (por página de 1000)
+                try {
+                    const all = await this._pages(`sprint = ${s.sprint.id}`, 'status,assignee');
+                    const logs = {issueChangeLogs: []};
+                    let next = null;
+                    do {
+                        const r = await c.post('/rest/api/3/changelog/bulkfetch', {issueIdsOrKeys: all.map(i => i.id), fieldIds: ['status'], maxResults: 1000, ...(next ? {nextPageToken: next} : {})});
+                        logs.issueChangeLogs.push(...r.issueChangeLogs);
+                        next = r.nextPageToken ?? null;
+                    } while (next);
+                    s.kpis = kpis(all, parseChangelogs(logs), colMap, {start: Date.parse(s.sprint.startDate), now: Date.now()}, s.me, this._cfg.team ?? []);
+                } catch {
+                    s.kpis = null;
+                }
                 // falha do burndown (endpoint interno) não derruba o placar
                 try {
                     const params = {rapidViewId: this._cfg.boardId, sprintId: s.sprint.id};
@@ -194,6 +209,7 @@ class Indicator extends PanelMenu.Button {
             } else {
                 s.counts = null;
                 s.burndown = null;
+                s.kpis = null;
             }
             s.error = null;
             s.updatedAt = Date.now();
@@ -286,6 +302,8 @@ class Indicator extends PanelMenu.Button {
         } else {
             this._burndownBox.add_child(label(sprint ? 'Burndown indisponível' : 'Sem sprint ativa para o burndown', 'jw-muted'));
         }
+        if (this._state.kpis?.me?.n)
+            this._burndownBox.add_child(this._kpiBlock(this._state.kpis));
         content.add_child(this._burndownBox);
 
         this._status = label('', 'jw-muted', {visible: false});
@@ -312,6 +330,100 @@ class Indicator extends PanelMenu.Button {
     _persist() {
         const {error: _e, ...persist} = this._state;
         writeJson(CACHE_PATH, persist);
+    }
+
+    // Você × média do time: estágios de entrega, horas por coluna, parados.
+    _kpiBlock(k) {
+        const box = new St.BoxLayout({vertical: true, style_class: 'jw-kpis'});
+        const pct = x => `${Math.round(x * 100)}%`;
+        const hrs = x => `${x.toFixed(1).replace('.', ',')} h`;
+        const legend = (me, team) => {
+            const l = new St.BoxLayout({style_class: 'jw-legend'});
+            for (const [cls, text] of [[me, 'Você'], [team, 'Média do time']]) {
+                l.add_child(new St.Widget({style_class: cls, y_align: Clutter.ActorAlign.CENTER}));
+                l.add_child(label(text, 'jw-legend-text'));
+            }
+            return l;
+        };
+        const head = (title, right) => {
+            const h = new St.BoxLayout({style_class: 'jw-kpi-head'});
+            h.add_child(label(title, 'jw-block-title', {x_expand: true}));
+            if (right)
+                h.add_child(label(right, 'jw-muted'));
+            box.add_child(h);
+        };
+        // barra horizontal: largura proporcional dentro de um trilho fixo
+        const TRACK = 300;
+        const bar = (frac, cls, marker = null) => {
+            const track = new St.Widget({style_class: 'jw-track', width: TRACK, layout_manager: new Clutter.FixedLayout(), y_align: Clutter.ActorAlign.CENTER});
+            track.add_child(new St.Widget({style_class: cls, width: Math.max(2, Math.round(TRACK * Math.min(1, frac))), height: 10}));
+            if (marker !== null) {
+                const m = new St.Widget({style_class: 'jw-marker', width: 2, height: 18});
+                m.set_position(Math.round(TRACK * Math.min(1, marker)) - 1, -4);
+                track.add_child(m);
+            }
+            return track;
+        };
+        const row = (name, widget, value, nameCls = 'jw-kpi-name') => {
+            const r = new St.BoxLayout({style_class: 'jw-kpi-row'});
+            r.add_child(label(name, nameCls));
+            r.add_child(widget);
+            const v = label('', 'jw-kpi-value');
+            v.clutter_text.set_markup(value);
+            r.add_child(v);
+            box.add_child(r);
+        };
+
+        head('Seu ritmo na sprint');
+        box.add_child(legend('jw-sw-me', 'jw-sw-mark'));
+        const {me, team} = k;
+        for (const [key, name] of [['posdev', 'Pós-dev'], ['pronto', 'Pronto'], ['done', 'Done']]) {
+            const mine = me[key] / me.n;
+            let cmp = '';
+            if (team) {
+                const pp = Math.round((mine - team[key]) * 100);
+                cmp = pp === 0 ? ' <span foreground="#8c9bab">= time</span>' : ` <span foreground="${pp > 0 ? '#7ee2b8' : '#fd9891'}">${pp > 0 ? '+' : ''}${pp} pp</span>`;
+            }
+            row(name, bar(mine, 'jw-bar-me', team ? team[key] : null), `<b>${me[key]}/${me.n} · ${pct(mine)}</b>${cmp}`);
+        }
+        box.add_child(wrap(label('Pós-dev = Ready to Test em diante · Pronto = Ready to Deploy em diante', 'jw-muted')));
+
+        if (team) {
+            head('Onde seus cards param', 'horas por card nesta sprint');
+            box.add_child(legend('jw-sw-me', 'jw-sw-team'));
+            const names = {progress: 'In Progress', review: 'Code Review', ready: 'Ready to Test', testing: 'Testing', deploy: 'Ready to Deploy'};
+            const top = Math.max(1, ...Object.keys(names).flatMap(c => [me.hours[c], team.hours[c]]));
+            for (const [col, name] of Object.entries(names)) {
+                const hot = k.worst?.col === col;
+                const pair = new St.BoxLayout({vertical: true, style_class: 'jw-pair', y_align: Clutter.ActorAlign.CENTER});
+                pair.add_child(new St.Widget({style_class: hot ? 'jw-bar-hot' : 'jw-bar-me', width: Math.max(2, Math.round(TRACK * me.hours[col] / top)), height: 6}));
+                pair.add_child(new St.Widget({style_class: 'jw-bar-team', width: Math.max(2, Math.round(TRACK * team.hours[col] / top)), height: 6}));
+                const holder = new St.Widget({width: TRACK, layout_manager: new Clutter.BinLayout()});
+                pair.x_align = Clutter.ActorAlign.START;
+                holder.add_child(pair);
+                row(name, holder, `${hot ? '<b>' : ''}${hrs(me.hours[col])}${hot ? '</b>' : ''} <span foreground="#8c9bab">· time ${hrs(team.hours[col]).replace(' h', '')}</span>`,
+                    hot ? 'jw-kpi-name jw-hot' : 'jw-kpi-name');
+            }
+            if (k.worst)
+                box.add_child(wrap(label(k.worst.ratio ? `Seus cards ficam ${k.worst.ratio.toFixed(1).replace('.', ',')}× mais tempo em ${names[k.worst.col]} que os do time.`
+                    : `Seus cards passam ${hrs(k.worst.diff)} a mais em ${names[k.worst.col]} que os do time.`, 'jw-callout')));
+        }
+
+        const stale = new St.BoxLayout({style_class: 'jw-kpi-head'});
+        stale.add_child(label('Parados há mais de 2 dias', 'jw-block-title', {x_expand: true}));
+        const n = label('', 'jw-kpi-value');
+        n.clutter_text.set_markup(`<b>${me.stale.length}</b>${k.teamStale !== null ? ` <span foreground="#8c9bab">· time ${k.teamStale.toFixed(1).replace('.', ',')}</span>` : ''}`);
+        stale.add_child(n);
+        box.add_child(stale);
+        if (me.stale.length) {
+            const keys = new St.BoxLayout({style_class: 'jw-stale-keys'});
+            for (const key of me.stale.slice(0, 5))
+                keys.add_child(button(key, 'jw-link jw-key-link', () => (this._search.text = key)));
+            if (me.stale.length > 5)
+                keys.add_child(label(`+${me.stale.length - 5}`, 'jw-muted'));
+            box.add_child(keys);
+        }
+        return box;
     }
 
     _openPrefs() {

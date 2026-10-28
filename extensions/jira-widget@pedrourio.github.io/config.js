@@ -12,7 +12,8 @@ const DEFAULTS = {
     githubOwner: '',
     intervalMinutes: 15,
     burndownUnit: 'cards', // 'cards' ou 'points'
-    pointsField: '', // campo de Story Points do site (customfield_…); vazio = burndown pelo padrão do Jira
+    pointsField: '',
+    team: [], // accountIds de quem entra na média do time // campo de Story Points do site (customfield_…); vazio = burndown pelo padrão do Jira
 };
 
 export function readJson(path, fallback) {

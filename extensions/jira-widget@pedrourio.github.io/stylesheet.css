@@ -65,3 +65,24 @@
 .jw-primary:hover, .jw-primary:focus { background-color: #85b8ff; }
 .jw-secondary { padding: 6px 12px; border-radius: 3px; background-color: rgba(161, 189, 217, 0.08); color: #b6c2cf; font-weight: 500; }
 .jw-secondary:hover, .jw-secondary:focus { background-color: rgba(166, 197, 226, 0.16); }
+
+/* KPIs */
+.jw-kpis { spacing: 8px; padding-top: 12px; margin-top: 6px; border-top: 1px solid #38414a; }
+.jw-kpi-head { spacing: 8px; padding-top: 6px; }
+.jw-legend { spacing: 6px; }
+.jw-legend-text { color: #b6c2cf; font-size: 0.85em; margin-right: 12px; }
+.jw-sw-me { width: 18px; height: 8px; border-radius: 4px; background-color: #579dff; }
+.jw-sw-team { width: 18px; height: 6px; border-radius: 3px; background-color: #5d6a77; }
+.jw-sw-mark { width: 2px; height: 14px; background-color: #dee4ea; }
+.jw-kpi-row { spacing: 12px; }
+.jw-kpi-name { min-width: 110px; color: #8c9bab; }
+.jw-hot { color: #f8e6a0; font-weight: 600; }
+.jw-kpi-value { color: #dee4ea; }
+.jw-track { height: 10px; border-radius: 5px; background-color: #38414a; }
+.jw-bar-me { border-radius: 5px; background-color: #579dff; }
+.jw-bar-hot { border-radius: 3px; background-color: #f8e6a0; }
+.jw-bar-team { border-radius: 3px; background-color: #5d6a77; }
+.jw-marker { background-color: #dee4ea; }
+.jw-pair { spacing: 2px; }
+.jw-callout { padding: 8px 10px; border-radius: 3px; background-color: #533f04; color: #f8e6a0; }
+.jw-stale-keys { spacing: 10px; }

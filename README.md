@@ -67,6 +67,8 @@ Na barra, ao lado do pr-widget: ícone, número da sprint ativa (`S28`) e um pla
 
 `Super+J` abre o menu com o cursor na busca (muda em `org.gnome.shell.extensions.jira-widget open-shortcut`). Ao abrir: sprint, dias restantes, busca e o burndown da sprint (o mesmo dado do relatório do Jira, contado em cards; `burndownUnit: "points"` conta Story Points), com a linha ondulando de leve só enquanto o menu está aberto (respeita "animações" desligadas no GNOME). Buscar por `123`, `PROJ-123`, palavra do título ou nome do épico abre o card: responsável, PRs (achadas no GitHub pela chave no título, com as regras do pr-widget) e anexos como links.
 
+Abaixo do burndown, **KPIs seus × média do time** (`team` no config): estágios de entrega (pós-dev = Ready to Test em diante, pronto = Ready to Deploy em diante, done = só Done), horas por card em cada coluna nesta sprint (com destaque na coluna em que você mais passa do time) e cards parados há mais de 2 dias. O histórico de status vem de `POST /rest/api/3/changelog/bulkfetch`, numa chamada para a sprint inteira.
+
 Custo: uma consulta pequena a cada `intervalMinutes` (padrão 15) para placar e burndown; abrir o menu não consulta nada; a busca espera 400 ms sem digitar e cancela a anterior; PRs só do card aberto.
 
 Config em `~/.config/jira-widget/config.json` (ou pela engrenagem do menu):
@@ -81,6 +83,7 @@ Config em `~/.config/jira-widget/config.json` (ou pela engrenagem do menu):
 | `burndownUnit` | `cards` (padrão) ou `points` |
 | `pointsField` | campo de Story Points (`customfield_…`), usado com `burndownUnit: "points"` |
 | `intervalMinutes` | intervalo do placar, padrão 15 |
+| `team` | accountIds de quem entra na média do time nos KPIs |
 
 Token de API: gere em https://id.atlassian.com/manage-profile/security/api-tokens e cole nas preferências (engrenagem do menu) ou rode `jira-token`. Fica no chaveiro (libsecret), nunca em arquivo.
 
