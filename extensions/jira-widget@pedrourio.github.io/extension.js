@@ -395,12 +395,13 @@ class Indicator extends PanelMenu.Button {
             const top = Math.max(1, ...Object.keys(names).flatMap(c => [me.hours[c], team.hours[c]]));
             for (const [col, name] of Object.entries(names)) {
                 const hot = k.worst?.col === col;
-                const pair = new St.BoxLayout({vertical: true, style_class: 'jw-pair', y_align: Clutter.ActorAlign.CENTER});
-                pair.add_child(new St.Widget({style_class: hot ? 'jw-bar-hot' : 'jw-bar-me', width: Math.max(2, Math.round(TRACK * me.hours[col] / top)), height: 6}));
-                pair.add_child(new St.Widget({style_class: 'jw-bar-team', width: Math.max(2, Math.round(TRACK * team.hours[col] / top)), height: 6}));
-                const holder = new St.Widget({width: TRACK, layout_manager: new Clutter.BinLayout()});
-                pair.x_align = Clutter.ActorAlign.START;
-                holder.add_child(pair);
+                // posições fixas: em caixa vertical as barras esticariam até a largura toda
+                const holder = new St.Widget({width: TRACK, height: 14, layout_manager: new Clutter.FixedLayout(), y_align: Clutter.ActorAlign.CENTER});
+                const mineBar = new St.Widget({style_class: hot ? 'jw-bar-hot' : 'jw-bar-me', width: Math.max(2, Math.round(TRACK * me.hours[col] / top)), height: 6});
+                const teamBar = new St.Widget({style_class: 'jw-bar-team', width: Math.max(2, Math.round(TRACK * team.hours[col] / top)), height: 6});
+                teamBar.set_position(0, 8);
+                holder.add_child(mineBar);
+                holder.add_child(teamBar);
                 row(name, holder, `${hot ? '<b>' : ''}${hrs(me.hours[col])}${hot ? '</b>' : ''} <span foreground="#8c9bab">· time ${hrs(team.hours[col]).replace(' h', '')}</span>`,
                     hot ? 'jw-kpi-name jw-hot' : 'jw-kpi-name');
             }
