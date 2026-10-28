@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.jira-widget" path="/org/gnome/shell/extensions/jira-widget/">
+    <key name="open-shortcut" type="as">
+      <default><![CDATA[['<Super>j']]]></default>
+      <summary>Atalho que abre o menu do Jira com o foco na busca</summary>
+    </key>
+  </schema>
+</schemalist>

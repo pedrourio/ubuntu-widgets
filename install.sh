@@ -5,6 +5,7 @@ repo=$(cd "$(dirname "$0")" && pwd)
 dest="$HOME/.local/share/gnome-shell/extensions"
 mkdir -p "$dest" "$HOME/.local/bin"
 for ext in "$repo"/extensions/*/; do
+  [[ -d $ext/schemas ]] && glib-compile-schemas "$ext/schemas"
   ln -sfn "${ext%/}" "$dest/$(basename "$ext")"
   echo "ligado: $(basename "$ext")"
 done

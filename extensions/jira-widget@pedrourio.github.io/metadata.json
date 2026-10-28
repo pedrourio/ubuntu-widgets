@@ -2,6 +2,9 @@
   "uuid": "jira-widget@pedrourio.github.io",
   "name": "Jira Widget",
   "description": "Sprint ativa, placar dos seus cards, burndown e busca de cards do Jira na barra do topo.",
-  "shell-version": ["50"],
-  "url": "https://github.com/pedrourio/ubuntu-widgets"
+  "shell-version": [
+    "50"
+  ],
+  "url": "https://github.com/pedrourio/ubuntu-widgets",
+  "settings-schema": "org.gnome.shell.extensions.jira-widget"
 }

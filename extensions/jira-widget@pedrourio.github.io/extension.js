@@ -4,6 +4,8 @@ import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import Pango from 'gi://Pango';
+import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
@@ -551,9 +553,13 @@ export default class JiraWidgetExtension extends Extension {
         this._indicator = new Indicator(this);
         // depois do Spotify (1), dos fones (2) e das PRs (3)
         Main.panel.addToStatusArea(this.uuid, this._indicator, 4, 'left');
+        // Super+J: abre (ou fecha) o menu; o foco vai para a busca ao abrir
+        Main.wm.addKeybinding('open-shortcut', this.getSettings(), Meta.KeyBindingFlags.NONE,
+            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW, () => this._indicator.menu.toggle());
     }
 
     disable() {
+        Main.wm.removeKeybinding('open-shortcut');
         this._indicator.destroy();
         this._indicator = null;
     }
