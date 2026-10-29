@@ -167,13 +167,17 @@ class Indicator extends PanelMenu.Button {
         const ctx = {me: data.viewer.login, reviewer: this._cfg.reviewer, repoPrefix: this._cfg.repoPrefix, cardPattern: this._cfg.cardPattern};
         const extraNodes = Object.keys(data).filter(k => /^x\d+$/.test(k)).map(k => data[k]?.pullRequest);
         const seen = new Set();
+        const fromSearch = new Set(data.search.nodes.map(n => n?.url));
+        const watched = new Set(this._cfg.extra.map(k => k.toLowerCase()));
         this._items = [...data.search.nodes, ...extraNodes]
             .filter(n => n?.number && !seen.has(n.url) && seen.add(n.url))
             .map(n => {
                 const c = classify(n, ctx, this._prev.get(n.url));
                 this._prev.set(n.url, c);
                 return c;
-            });
+            })
+            // desmonitorada enquanto a consulta rodava: não volta
+            .filter(p => fromSearch.has(p.url) || watched.has(p.key.toLowerCase()));
         this._error = partialError;
         this._updatedAt = Date.now();
         writeJson(CACHE_PATH, this._items.map(p => ({key: p.key, title: p.title})));
@@ -417,6 +421,8 @@ class Indicator extends PanelMenu.Button {
             });
         });
         actions.add_child(copy);
+        if (this._cfg.extra.some(k => k.toLowerCase() === p.key.toLowerCase()))
+            actions.add_child(iconButton('list-remove-symbolic', `Parar de monitorar a PR ${p.num}`, () => this._unwatch(p)));
         if (p.canMerge)
             actions.add_child(this._mergeButton(p));
         row.add_child(actions);
@@ -442,6 +448,19 @@ class Indicator extends PanelMenu.Button {
             }));
         }
         return row;
+    }
+
+    // Sai do config e da lista na hora; se a PR também é sua ou pede seu review, a próxima consulta a traz de volta no grupo normal.
+    _unwatch(p) {
+        this._cfg.extra = this._cfg.extra.filter(k => k.toLowerCase() !== p.key.toLowerCase());
+        this._selfSave = true;
+        saveConfig(this._cfg);
+        this._items = this._items.filter(i => i.key !== p.key);
+        this._updatePill();
+        this._addNotice = {text: `Parou de monitorar ${p.repo} #${p.num}.`, cls: 'prw-muted'};
+        this._render();
+        this._search.grab_key_focus();
+        this.refresh();
     }
 
     // Merge em dois cliques: o primeiro só pede confirmação (some sozinho em 4 s).
