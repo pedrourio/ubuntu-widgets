@@ -148,3 +148,73 @@ export function kpis(issues, hist, colMap, window, me, team) {
     const top = diffs.sort((a, b) => b.diff - a.diff)[0];
     return {me: mine, team: t, teamStale: mean(others.map(p => p.stale.length)), worst: top.diff >= 1 ? top : null};
 }
+
+const median = xs => {
+    if (!xs.length)
+        return null;
+    const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+const meanOf = (people, key) => {
+    const xs = people.map(p => p[key]).filter(x => x !== null);
+    return xs.length ? mean(xs) : null;
+};
+
+// Uma pessoa: lead time (abertura da PR → primeiro deploy depois do merge) e revisão do reviewer de IA.
+function personDelivery(prs, deploys, reviewer, decide) {
+    const own = prs.filter(p => p.headRefName !== 'base'); // PR de deploy não é trabalho de ninguém
+    const leads = [];
+    let pending = 0, withBot = 0, first = 0, rounds = 0, pass = 0;
+    for (const p of own) {
+        const merged = Date.parse(p.mergedAt);
+        const dep = (deploys[p.repository.name] ?? []).find(t => t >= merged);
+        if (dep)
+            leads.push((dep - Date.parse(p.createdAt)) / 3600e3);
+        else if (deploys[p.repository.name])
+            pending++;
+        const bot = p.reviews.nodes.filter(r => r.author?.login === reviewer);
+        if (bot.length) {
+            withBot++;
+            rounds += bot.length;
+            first += decide(bot[0]) === 'pass' ? 1 : 0;
+            pass += decide(bot.at(-1)) === 'pass' ? 1 : 0;
+        }
+    }
+    return {
+        n: own.length, leadHours: median(leads), pendingDeploy: pending,
+        firstPass: withBot ? first / withBot : null, reviewsPerPr: withBot ? rounds / withBot : null, mergedPass: withBot ? pass / withBot : null,
+    };
+}
+
+export function deliveryKpis(prsByLogin, deploys, reviewer, decide, me, team) {
+    const mine = personDelivery(prsByLogin[me] ?? [], deploys, reviewer, decide);
+    const others = team.map(l => personDelivery(prsByLogin[l] ?? [], deploys, reviewer, decide)).filter(p => p.n);
+    const keys = ['leadHours', 'firstPass', 'reviewsPerPr', 'mergedPass'];
+    return {me: mine, team: others.length ? Object.fromEntries(keys.map(k => [k, meanOf(others, k)])) : null};
+}
+
+// Eficiência do fluxo: tempo em In Progress + Code Review ÷ tempo de In Progress até Done (cards concluídos).
+const ACTIVE = new Set(['progress', 'review']);
+function personFlow(cards, hist, colMap) {
+    let act = 0, tot = 0, n = 0;
+    for (const c of cards) {
+        const h = hist.get(String(c.id)) ?? [];
+        const s = h.findIndex(([, st]) => colMap.get(st) === 'progress');
+        const e = h.findLastIndex(([, st]) => colMap.get(st) === 'done');
+        if (s < 0 || e <= s)
+            continue;
+        for (let k = s; k < e; k++) {
+            if (ACTIVE.has(colMap.get(h[k][1])))
+                act += h[k + 1][0] - h[k][0];
+        }
+        tot += h[e][0] - h[s][0];
+        n++;
+    }
+    return {n, ratio: tot ? act / tot : null};
+}
+
+export function flowEfficiency(cards, hist, colMap, me, team) {
+    const of = id => cards.filter(c => c.fields?.assignee?.accountId === id);
+    const others = team.map(id => personFlow(of(id), hist, colMap)).filter(p => p.n);
+    return {me: personFlow(of(me), hist, colMap), team: others.length ? {ratio: meanOf(others, 'ratio')} : null};
+}

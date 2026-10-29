@@ -10,14 +10,16 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
-import {COLUMNS, columnMap, tally, pickActiveSprint, burndownSeries, daysLeft, toJql, epicJql, attachmentUrl, initials, parseChangelogs, kpis} from './logic.js';
+import {COLUMNS, columnMap, tally, pickActiveSprint, burndownSeries, daysLeft, toJql, epicJql, attachmentUrl, initials, parseChangelogs, kpis, flowEfficiency} from './logic.js';
 import {loadConfig, readJson, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 import {lookupToken} from './secret.js';
 import {JiraClient} from './jira.js';
-import {fetchCardPrs} from './prs.js';
+import {fetchCardPrs, fetchDelivery} from './prs.js';
 import {Burndown} from './chart.js';
 
 const DAY = 86400e3;
+const DELIVERY_EVERY = 6 * 3600e3;
+const DELIVERY_DAYS = 30;
 const FIELDS = 'summary,status,assignee,parent,issuetype,attachment';
 const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 const ERRORS = {
@@ -224,6 +226,45 @@ class Indicator extends PanelMenu.Button {
             return;
         this._updatePill();
         this._renderWhenClosed();
+        if (!this._state.error)
+            this._refreshDelivery();
+    }
+
+    // Métricas de entrega mudam devagar: no máximo a cada 6 h (GitHub + histórico do Jira dos últimos 30 dias).
+    async _refreshDelivery() {
+        const s = this._state;
+        if (this._deliveryBusy || (s.deliveryAt && Date.now() - s.deliveryAt < DELIVERY_EVERY) || !this._cfg.githubLogin || !s.board)
+            return;
+        this._deliveryBusy = true;
+        try {
+            const c = this._client;
+            const colMap = columnMap(s.board);
+            const doneIds = [...colMap].filter(([, col]) => col === 'done').map(([id]) => id);
+            const ids = [s.me, ...(this._cfg.team ?? [])].map(i => `"${i}"`).join(',');
+            const cards = await this._pages(`project = ${this._cfg.project} AND assignee in (${ids}) AND status CHANGED TO (${doneIds.join(',')}) AFTER -${DELIVERY_DAYS}d`, 'assignee');
+            const logs = {issueChangeLogs: []};
+            for (let i = 0; i < cards.length; i += 1000) {
+                let next = null;
+                do {
+                    const r = await c.post('/rest/api/3/changelog/bulkfetch', {issueIdsOrKeys: cards.slice(i, i + 1000).map(x => x.id), fieldIds: ['status'], maxResults: 1000, ...(next ? {nextPageToken: next} : {})});
+                    logs.issueChangeLogs.push(...r.issueChangeLogs);
+                    next = r.nextPageToken ?? null;
+                } while (next);
+            }
+            const flow = flowEfficiency(cards, parseChangelogs(logs), colMap, s.me, this._cfg.team ?? []);
+            const prDir = Main.extensionManager.lookup('pr-widget@pedrourio.github.io')?.path;
+            const prs = await fetchDelivery(this._cfg, DELIVERY_DAYS, null, prDir);
+            const reviewerName = readJson(GLib.build_filenamev([GLib.get_user_config_dir(), 'pr-widget', 'config.json']), {}).reviewerName ?? 'reviewer';
+            s.delivery = {days: DELIVERY_DAYS, prs, flow, reviewerName};
+            s.deliveryAt = Date.now();
+            this._persist();
+        } catch (e) {
+            console.error(`jira-widget: métricas de entrega: ${e.message}`);
+        } finally {
+            this._deliveryBusy = false;
+        }
+        if (!this._destroyed)
+            this._renderWhenClosed();
     }
 
     _updatePill() {
@@ -302,6 +343,9 @@ class Indicator extends PanelMenu.Button {
         } else {
             this._burndownBox.add_child(label(sprint ? 'Burndown indisponível' : 'Sem sprint ativa para o burndown', 'jw-muted'));
         }
+        // entrega (30 dias) em cima, como principal; KPIs da sprint embaixo
+        if (this._state.delivery?.prs?.me?.n)
+            this._burndownBox.add_child(this._deliveryBlock(this._state.delivery));
         if (this._state.kpis?.me?.n)
             this._burndownBox.add_child(this._kpiBlock(this._state.kpis));
         content.add_child(this._burndownBox);
@@ -332,9 +376,8 @@ class Indicator extends PanelMenu.Button {
         writeJson(CACHE_PATH, persist);
     }
 
-    // Você × média do time: estágios de entrega, horas por coluna, parados.
-    _kpiBlock(k) {
-        const box = new St.BoxLayout({vertical: true, style_class: 'jw-kpis'});
+    // Peças de desenho comuns aos blocos de métricas (legenda, título, barra com traço do time, linha).
+    _kit(box) {
         const pct = x => `${Math.round(x * 100)}%`;
         const hrs = x => `${x.toFixed(1).replace('.', ',')} h`;
         const legend = (me, team) => {
@@ -373,6 +416,52 @@ class Indicator extends PanelMenu.Button {
             r.add_child(v);
             box.add_child(r);
         };
+        return {pct, hrs, legend, head, bar, row, TRACK};
+    }
+
+    // Entrega dos últimos 30 dias: lead time até produção, revisão do reviewer de IA, eficiência do fluxo.
+    _deliveryBlock(d) {
+        const box = new St.BoxLayout({vertical: true, style_class: 'jw-kpis'});
+        const {pct, legend, head, bar, row} = this._kit(box);
+        const {me, team} = d.prs;
+        const days = h => `${(h / 24).toFixed(1).replace('.', ',')} d`;
+        const num = x => x.toFixed(1).replace('.', ',');
+        // diferença colorida: verde quando você está melhor (higherBetter diz o sentido)
+        const vs = (mine, theirs, fmt, higherBetter) => {
+            if (theirs === null || theirs === undefined)
+                return '';
+            const better = higherBetter ? mine > theirs : mine < theirs;
+            const same = Math.abs(mine - theirs) < 1e-9 || fmt(mine) === fmt(theirs);
+            return ` <span foreground="${same ? '#8c9bab' : better ? '#7ee2b8' : '#fd9891'}">· time ${fmt(theirs)}</span>`;
+        };
+        head('Entrega', `últimos ${d.days} dias`);
+        box.add_child(legend('jw-sw-me', 'jw-sw-mark'));
+        if (me.leadHours !== null) {
+            const top = Math.max(me.leadHours, team?.leadHours ?? 0) * 1.25;
+            row('Lead time', bar(me.leadHours / top, 'jw-bar-me', team?.leadHours != null ? team.leadHours / top : null),
+                `<b>${days(me.leadHours)}</b>${vs(me.leadHours, team?.leadHours, days, false)}`);
+        }
+        if (me.firstPass !== null) {
+            row('PASS de 1ª', bar(me.firstPass, 'jw-bar-me', team?.firstPass ?? null), `<b>${pct(me.firstPass)}</b>${vs(me.firstPass, team?.firstPass, pct, true)}`);
+            const top = Math.max(me.reviewsPerPr, team?.reviewsPerPr ?? 0) * 1.25;
+            row('Revisões/PR', bar(me.reviewsPerPr / top, 'jw-bar-me', team?.reviewsPerPr != null ? team.reviewsPerPr / top : null),
+                `<b>${num(me.reviewsPerPr)}</b>${team ? ` <span foreground="#8c9bab">· time ${num(team.reviewsPerPr)}</span>` : ''}`);
+            row('Merge com PASS', bar(me.mergedPass, 'jw-bar-me', team?.mergedPass ?? null), `<b>${pct(me.mergedPass)}</b>${vs(me.mergedPass, team?.mergedPass, pct, true)}`);
+        }
+        const flow = d.flow;
+        if (flow?.me?.ratio != null)
+            row('Eficiência', bar(flow.me.ratio, 'jw-bar-me', flow.team?.ratio ?? null), `<b>${pct(flow.me.ratio)}</b>${vs(flow.me.ratio, flow.team?.ratio, pct, true)}`);
+        // leitura que só os números juntos mostram: itera mais e mergeia mais com PASS
+        if (team && me.reviewsPerPr > team.reviewsPerPr * 1.3 && me.mergedPass > team.mergedPass + 0.1)
+            box.add_child(wrap(label(`Você itera mais com o ${d.reviewerName} (${num(me.reviewsPerPr)} revisões por PR) e mergeia com PASS mais vezes (${pct(me.mergedPass)} × ${pct(team.mergedPass)}).`, 'jw-callout-blue')));
+        box.add_child(wrap(label(`Lead time: PR aberta até o deploy em produção · Eficiência: tempo em In Progress e Code Review sobre o total até Done · ${me.n} PRs, ${flow?.me?.n ?? 0} cards`, 'jw-muted')));
+        return box;
+    }
+
+    // Você × média do time: estágios de entrega, horas por coluna, parados.
+    _kpiBlock(k) {
+        const box = new St.BoxLayout({vertical: true, style_class: 'jw-kpis'});
+        const {pct, hrs, legend, head, bar, row, TRACK} = this._kit(box);
 
         head('Seu ritmo na sprint');
         box.add_child(legend('jw-sw-me', 'jw-sw-mark'));

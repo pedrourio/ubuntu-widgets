@@ -39,20 +39,21 @@ const maxDate = dates => dates.filter(Boolean).reduce((a, b) => (a > b ? a : b),
 // Código de card no título; padrão = chave de issue do Jira (ABC-123).
 export const DEFAULT_CARD_PATTERN = '\\b[A-Z][A-Z0-9]+-\\d+\\b';
 
+// Decisão de um review do reviewer de IA: 'changes' | 'pass' | 'warn' | 'approved' | null.
+export function reviewDecision(r) {
+    if (r.state === 'CHANGES_REQUESTED')
+        return 'changes';
+    const decision = r.body?.match(/decision:\s*(PASS|WARN)/)?.[1];
+    if (decision)
+        return decision.toLowerCase();
+    return r.state === 'APPROVED' ? 'approved' : null;
+}
+
 export function classify(pr, {me, reviewer, repoPrefix = '', cardPattern = DEFAULT_CARD_PATTERN}, prev) {
     const reviews = pr.reviews.nodes;
     const bot = reviews.filter(r => r.author?.login === reviewer);
     const last = bot.at(-1);
-    let status = 'none';
-    if (last) {
-        const decision = last.body?.match(/decision:\s*(PASS|WARN)/)?.[1];
-        if (last.state === 'CHANGES_REQUESTED')
-            status = 'changes';
-        else if (decision)
-            status = decision.toLowerCase();
-        else if (last.state === 'APPROVED')
-            status = 'approved';
-    }
+    const status = (last && reviewDecision(last)) ?? 'none';
     const myLast = maxDate([
         ...reviews.filter(r => r.author?.login === me).map(r => r.submittedAt),
         ...pr.comments.nodes.filter(c => c.author?.login === me).map(c => c.createdAt),

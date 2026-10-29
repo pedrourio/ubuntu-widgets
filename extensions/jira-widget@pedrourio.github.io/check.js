@@ -1,5 +1,5 @@
 // gjs -m check.js  → falha com exceção se alguma regra de logic.js quebrar.
-import {COLUMNS, columnMap, tally, pickActiveSprint, daysLeft, toJql, epicJql, burndownSeries, attachmentUrl, initials, parseChangelogs, kpis} from './logic.js';
+import {COLUMNS, columnMap, tally, pickActiveSprint, daysLeft, toJql, epicJql, burndownSeries, attachmentUrl, initials, parseChangelogs, kpis, deliveryKpis, flowEfficiency} from './logic.js';
 
 const assert = (cond, msg) => {
     if (!cond)
@@ -86,3 +86,33 @@ assert(k.me.stale.join() === 'ACME-1' && k.teamStale === 1, `parados > 2 dias: $
 assert(k.worst?.col === 'ready', `coluna mais acima do time: ${JSON.stringify(k.worst)}`);
 assert(kpis(sprintIssues, hist, map, {start: 10 * H, now: 16 * H}, 'eu', []).team === null, 'sem time, sem comparação');
 ok('kpis');
+
+// Entrega (30 dias): lead time PR→produção, revisão do reviewer de IA, eficiência do fluxo
+const iso = h => new Date(h * H).toISOString();
+const rv = (decision, h) => ({author: {login: 'bot'}, state: decision === 'CHANGES' ? 'CHANGES_REQUESTED' : 'COMMENTED', body: decision === 'CHANGES' ? '' : `decision: ${decision}`, submittedAt: iso(h)});
+const decide = r => r.state === 'CHANGES_REQUESTED' ? 'changes' : r.body?.match(/decision:\s*(PASS|WARN)/)?.[1]?.toLowerCase() ?? null;
+const pr2 = (repo, created, merged, reviews) => ({repository: {name: repo}, headRefName: 'feat/x', createdAt: iso(created), mergedAt: iso(merged), reviews: {nodes: reviews}});
+const deploys = {back: [30 * H, 100 * H]};
+const prsBy = {
+    eu: [pr2('back', 0, 20, [rv('WARN', 5), rv('PASS', 10)]), pr2('back', 50, 60, [rv('PASS', 55)]), pr2('back', 200, 210, [rv('WARN', 205)])],
+    a: [pr2('back', 10, 20, [rv('PASS', 15)])],
+    b: [pr2('back', 0, 90, [rv('WARN', 5)]), {...pr2('back', 0, 95, []), headRefName: 'base'}],
+};
+const d = deliveryKpis(prsBy, deploys, 'bot', decide, 'eu', ['a', 'b', 'sem-prs']);
+// eu: lead 30h e 50h (a de 210h ainda sem deploy) → mediana 40h; 1ª PASS 1/3; revisões 4/3; mergeadas com PASS 2/3
+assert(d.me.n === 3 && Math.abs(d.me.leadHours - 40) < 1e-9 && d.me.pendingDeploy === 1, `lead time meu: ${JSON.stringify(d.me)}`);
+assert(Math.abs(d.me.firstPass - 1 / 3) < 1e-9 && Math.abs(d.me.reviewsPerPr - 4 / 3) < 1e-9 && Math.abs(d.me.mergedPass - 2 / 3) < 1e-9, 'revisão minha');
+// time: a (lead 20h, 1ª PASS 1, 1 rev, PASS 1) e b (lead 100h, 0, 1, 0; PR de deploy ignorada); sem-prs fora da média
+assert(d.team.leadHours === 60 && d.team.firstPass === 0.5 && d.team.reviewsPerPr === 1 && d.team.mergedPass === 0.5, `time: ${JSON.stringify(d.team)}`);
+assert(deliveryKpis({eu: []}, deploys, 'bot', decide, 'eu', []).me.n === 0, 'sem PRs não quebra');
+
+// eficiência: tempo em progress+review ÷ tempo de progress até done
+const fc = [card('7', 'eu', 'done'), card('8', 'a', 'done'), card('9', 'eu', 'ready')];
+const fh = new Map([
+    ['7', [[0, st('progress')], [2 * H, st('ready')], [6 * H, st('review')], [8 * H, st('done')]]], // ativo 4h de 8h
+    ['8', [[0, st('progress')], [1 * H, st('done')]]], // 1h de 1h
+    ['9', [[0, st('progress')], [5 * H, st('ready')]]], // não concluiu: fora
+]);
+const fe = flowEfficiency(fc, fh, map, 'eu', ['a']);
+assert(fe.me.ratio === 0.5 && fe.me.n === 1 && fe.team.ratio === 1, `eficiência: ${JSON.stringify(fe)}`);
+ok('entrega');

@@ -1,5 +1,5 @@
 // gjs -m check.js  → falha com exceção se alguma regra de logic.js quebrar.
-import {classify, parsePrRef, groupPrs, counts, matchesQuery, buildCardPrQuery} from './logic.js';
+import {classify, parsePrRef, groupPrs, counts, matchesQuery, buildCardPrQuery, reviewDecision} from './logic.js';
 
 const assert = (cond, msg) => {
     if (!cond)
@@ -65,6 +65,9 @@ assert(!matchesQuery(sample, '1271'), 'número diferente não casa');
 assert(matchesQuery(sample, 'credêncial cnpj') && matchesQuery(sample, 'backend cadastro'), 'busca por palavras, sem acento');
 assert(!matchesQuery(sample, 'credencial audiometria'), 'todas as palavras precisam casar');
 print('ok: busca');
+
+assert(reviewDecision({state: 'CHANGES_REQUESTED', body: 'decision: PASS'}) === 'changes' && reviewDecision({state: 'COMMENTED', body: '(decision: WARN)'}) === 'warn'
+    && reviewDecision({state: 'APPROVED', body: ''}) === 'approved' && reviewDecision({state: 'COMMENTED', body: 'oi'}) === null, 'decisão de um review');
 
 // estado da PR e merge liberado
 c = classify(pr([bot('APPROVED', 'PASS', '2026-01-02')], [], '2026-01-01', {state: 'OPEN'}), ctx);
