@@ -15,7 +15,10 @@ trap 'tput cnorm; kill $pid 2>/dev/null' EXIT
 while true; do
   clear
   tput civis
-  if (( RANDOM % 5 == 0 )) && [[ -x /usr/games/cbonsai ]]; then
+  pick=$(( RANDOM % 5 ))
+  if (( pick == 1 )); then
+    python3 -I "$here/bird.py" &  # 1 vez em 5: a ave trazendo o logo
+  elif (( pick == 0 )) && [[ -x /usr/games/cbonsai ]]; then
     # 1 vez em 5: bonsais crescendo por 40 s. LC_ALL=C: com locale pt o cbonsai não lê "0.01";
     # --foreground: num grupo de processos próprio o ncurses fica parado esperando o terminal
     LC_ALL=C timeout --foreground 40 /usr/games/cbonsai -li -t 0.01 -w 1.5 -L 48 -m '</>' </dev/null &
