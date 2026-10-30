@@ -14,8 +14,15 @@ tput civis
 trap 'tput cnorm; kill $pid 2>/dev/null' EXIT
 while true; do
   clear
-  "$tte" -i "$here/logo.txt" --frame-rate 120 --canvas-width 0 --canvas-height 0 \
-    --anchor-canvas c --anchor-text c "${effects[RANDOM % ${#effects[@]}]}" &
+  tput civis
+  if (( RANDOM % 5 == 0 )) && [[ -x /usr/games/cbonsai ]]; then
+    # 1 vez em 5: bonsais crescendo por 40 s. LC_ALL=C: com locale pt o cbonsai não lê "0.01";
+    # --foreground: num grupo de processos próprio o ncurses fica parado esperando o terminal
+    LC_ALL=C timeout --foreground 40 /usr/games/cbonsai -li -t 0.01 -w 1.5 -L 48 -m '</>' </dev/null &
+  else
+    "$tte" -i "$here/logo.txt" --frame-rate 120 --canvas-width 0 --canvas-height 0 \
+      --anchor-canvas c --anchor-text c "${effects[RANDOM % ${#effects[@]}]}" &
+  fi
   pid=$!
   while kill -0 $pid 2>/dev/null; do
     read -rsn1 -t 0.3 && exit

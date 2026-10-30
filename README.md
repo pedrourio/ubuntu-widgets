@@ -102,7 +102,7 @@ cd extensions/jira-widget@pedrourio.github.io && gjs -m check.js   # regras
 
 Requer o `tte`: `uv tool install terminaltexteffects` (ou `pipx install terminaltexteffects`) e o Ptyxis.
 
-Depois de `idle-minutes` (padrão 3) sem mexer no mouse nem no teclado, abre `screensaver.sh` num Ptyxis em tela cheia em cada monitor, com o ponteiro escondido: sorteia um efeito do `tte` por vez sobre `logo.txt`. Qualquer tecla ou movimento fecha. Não abre com a sessão bloqueada nem com algo segurando a tela ligada (vídeo, chamada). O apagar e bloquear da tela do GNOME continuam valendo, por isso o tempo dela fica abaixo do de **Energia → Tela em branco**.
+Depois de `idle-minutes` (padrão 3) sem mexer no mouse nem no teclado, abre `screensaver.sh` num Ptyxis em tela cheia em cada monitor, com o ponteiro escondido: sorteia um efeito do `tte` por vez sobre `logo.txt` e, 1 vez em 5, bonsais crescendo (`cbonsai`, se instalado: `sudo apt install cbonsai`). Qualquer tecla ou movimento fecha. Não abre com a sessão bloqueada nem com algo segurando a tela ligada (vídeo, chamada). O apagar e bloquear da tela do GNOME continuam valendo, por isso o tempo dela fica abaixo do de **Energia → Tela em branco**.
 
 ```sh
 screensaver                                                    # testar agora
