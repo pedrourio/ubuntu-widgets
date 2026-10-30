@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Anima logo.txt em loop com o tte, um efeito sorteado por vez; qualquer tecla sai.
-# Sem argumento abre num terminal em tela cheia; --run é o loop dentro dele.
+# Sem argumento pede à extensão para abrir em todos os monitores; --run é o loop dentro de cada terminal.
 here=$(dirname "$(readlink -f "$0")")
 tte=$(command -v tte || echo "$HOME/.local/bin/tte")
 if [[ $1 != --run ]]; then
   [[ -x $tte ]] || { echo "tte não encontrado: uv tool install terminaltexteffects" >&2; exit 1; }
-  exec ptyxis -s --fullscreen -T screensaver -- "$here/screensaver.sh" --run
+  gdbus call --session --dest org.gnome.Shell --object-path /io/github/pedrourio/Screensaver \
+    --method io.github.pedrourio.Screensaver.Start >/dev/null && exit
+  echo "extensão screensaver@pedrourio.github.io não está ativa" >&2; exit 1
 fi
 effects=(beams binarypath blackhole bouncyballs bubbles burn colorshift crumble decrypt errorcorrect expand fireworks highlight laseretch matrix middleout orbittingvolley overflow pour print rain randomsequence rings scattered slice slide smoke spotlights spray swarm sweep synthgrid thunderstorm unstable vhstape waves wipe)
 tput civis
