@@ -7,7 +7,7 @@ if [[ $1 != --run ]]; then
   [[ -x $tte ]] || { echo "tte não encontrado: uv tool install terminaltexteffects" >&2; exit 1; }
   exec ptyxis -s --fullscreen -T screensaver -- "$here/screensaver.sh" --run
 fi
-effects=(beams binarypath blackhole bouncyballs bubbles burn colorshift crumble decrypt errorcorrect expand fireworks highlight laseretch matrix middleout orbittingvolley overflow pour print rain randomsequence rings scattered slice slide spotlights spray swarm sweep synthgrid unstable vhstape waves wipe)
+effects=(beams binarypath blackhole bouncyballs bubbles burn colorshift crumble decrypt errorcorrect expand fireworks highlight laseretch matrix middleout orbittingvolley overflow pour print rain randomsequence rings scattered slice slide smoke spotlights spray swarm sweep synthgrid thunderstorm unstable vhstape waves wipe)
 tput civis
 trap 'tput cnorm; kill $pid 2>/dev/null' EXIT
 while true; do
