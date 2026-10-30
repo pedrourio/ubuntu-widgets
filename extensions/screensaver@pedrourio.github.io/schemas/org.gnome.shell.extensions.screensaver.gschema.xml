@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.screensaver" path="/org/gnome/shell/extensions/screensaver/">
+    <key name="idle-minutes" type="u">
+      <default>3</default>
+      <summary>Minutos parado até a tela de descanso abrir</summary>
+      <description>Abaixo do apagar da tela do GNOME (Energia → Tela em branco), que continua bloqueando a sessão.</description>
+    </key>
+  </schema>
+</schemalist>

@@ -6,6 +6,7 @@ Extensões pequenas para a barra do topo do GNOME Shell 50 (Wayland), feitas par
 | --- | --- |
 | `pr-widget` | Suas PRs abertas no GitHub: contadores na barra (pedem sua resposta, aguardando o reviewer, prontas para merge, com conflito) e um menu com grupos, status do reviewer autônomo, abrir PR e copiar link. |
 | `pr-status` + skill do Claude Code | O mesmo status das PRs no terminal (`pr-status [--view status\|group] [busca]`) e a skill `pr-status`, que faz o Claude consultar por ele. Usa o mesmo `logic.js` do widget. |
+| `screensaver` | Tela de descanso no estilo do Omarchy: depois de alguns minutos parado, um terminal em tela cheia anima o símbolo `</>` com o TerminalTextEffects. |
 | `bt-headset-battery` | Ícone do fone Bluetooth conectado com barra e porcentagem de bateria (lida do UPower). |
 
 ## Instalar
@@ -95,4 +96,16 @@ O burndown usa o endpoint interno do relatório do Jira (`/rest/greenhopper/1.0/
 
 ```sh
 cd extensions/jira-widget@pedrourio.github.io && gjs -m check.js   # regras
+```
+
+## screensaver
+
+Requer o `tte`: `uv tool install terminaltexteffects` (ou `pipx install terminaltexteffects`) e o Ptyxis.
+
+Depois de `idle-minutes` (padrão 3) sem mexer no mouse nem no teclado, abre `screensaver.sh` num Ptyxis em tela cheia: sorteia um efeito do `tte` por vez sobre `logo.txt`. Qualquer tecla ou movimento fecha. Não abre com a sessão bloqueada nem com algo segurando a tela ligada (vídeo, chamada). O apagar e bloquear da tela do GNOME continuam valendo, por isso o tempo dela fica abaixo do de **Energia → Tela em branco**.
+
+```sh
+screensaver                                                    # testar agora
+gsettings --schemadir ~/.local/share/gnome-shell/extensions/screensaver@pedrourio.github.io/schemas \
+  set org.gnome.shell.extensions.screensaver idle-minutes 4
 ```

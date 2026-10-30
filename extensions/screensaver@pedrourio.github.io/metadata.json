@@ -1,0 +1,7 @@
+{
+  "uuid": "screensaver@pedrourio.github.io",
+  "name": "Screensaver",
+  "description": "Depois de alguns minutos parado, abre um terminal em tela cheia animando um desenho com o TerminalTextEffects.",
+  "shell-version": ["50"],
+  "settings-schema": "org.gnome.shell.extensions.screensaver"
+}

@@ -12,6 +12,7 @@ done
 for bin in ext-hotload ext-reload pr-status jira-token; do
   ln -sfn "$repo/bin/$bin" "$HOME/.local/bin/$bin"
 done
+ln -sfn "$repo/extensions/screensaver@pedrourio.github.io/screensaver.sh" "$HOME/.local/bin/screensaver"
 # skills do Claude Code: o mesmo repo, para andarem junto com o widget
 mkdir -p "$HOME/.claude/skills"
 for skill in "$repo"/claude-skills/*/; do
