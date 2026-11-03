@@ -51,8 +51,11 @@
 .prw-info-line { spacing: 4px; }
 .prw-actions { spacing: 4px; }
 
-.prw-btn { width: 30px; height: 30px; border-radius: 6px; background-color: #373e47; border: 1px solid #444c56; color: #adbac7; }
-.prw-btn:hover, .prw-btn:focus { background-color: #444c56; color: #cdd9e5; }
+.prw-btn { width: 30px; height: 30px; border-radius: 8px; background-color: transparent; color: #909dab; transition-duration: 120ms; }
+.prw-btn:hover, .prw-btn:focus { background-color: rgba(205, 217, 229, 0.1); color: #e6edf3; }
+.prw-btn-danger:hover, .prw-btn-danger:focus { background-color: rgba(244, 112, 103, 0.15); color: #f47067; }
+.prw-btn-ai { color: #e0823d; }
+.prw-btn-ai:hover, .prw-btn-ai:focus { background-color: rgba(224, 130, 61, 0.18); color: #f0a868; }
 .prw-btn-done, .prw-btn-done:hover { background-color: #347d39; color: #ffffff; }
 .prw-flat { background-color: transparent; border-color: transparent; color: #768390; width: 28px; height: 28px; }
 

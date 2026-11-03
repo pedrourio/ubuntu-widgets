@@ -32,8 +32,9 @@ const esc = t => GLib.markup_escape_text(t, -1);
 const label = (text, style_class = '', props = {}) =>
     new St.Label({text, style_class, y_align: Clutter.ActorAlign.CENTER, ...props});
 
-const iconButton = (icon_name, accessible_name, onClick) => {
-    const btn = new St.Button({style_class: 'prw-btn', child: new St.Icon({icon_name, icon_size: 16}), accessible_name, can_focus: true});
+// icon: nome do tema ou Gio.Icon (os act-*-symbolic.svg desta pasta)
+const iconButton = (icon, accessible_name, onClick) => {
+    const btn = new St.Button({style_class: 'prw-btn', child: new St.Icon({...typeof icon === 'string' ? {icon_name: icon} : {gicon: icon}, icon_size: 16}), accessible_name, can_focus: true});
     btn.connect('clicked', onClick);
     return btn;
 };
@@ -404,17 +405,18 @@ class Indicator extends PanelMenu.Button {
         row.add_child(info);
 
         const actions = new St.BoxLayout({style_class: 'prw-actions', y_align: Clutter.ActorAlign.START, visible: false});
-        actions.add_child(iconButton('web-browser-symbolic', `Abrir PR ${p.num} no navegador`, () => {
+        const act = name => Gio.icon_new_for_string(`${this._ext.path}/act-${name}-symbolic.svg`);
+        actions.add_child(iconButton(act('open'), `Abrir PR ${p.num} no navegador`, () => {
             Gio.AppInfo.launch_default_for_uri(p.url, null);
             this.menu.close();
         }));
-        const copy = iconButton('edit-copy-symbolic', `Copiar link da PR ${p.num}`, () => {
+        const copy = iconButton(act('copy'), `Copiar link da PR ${p.num}`, () => {
             St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, p.url);
-            copy.child.icon_name = 'object-select-symbolic';
+            copy.child.gicon = act('done');
             copy.add_style_class_name('prw-btn-done');
             GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1600, () => {
                 if (!this._destroyed && copy.get_stage()) {
-                    copy.child.icon_name = 'edit-copy-symbolic';
+                    copy.child.gicon = act('copy');
                     copy.remove_style_class_name('prw-btn-done');
                 }
                 return GLib.SOURCE_REMOVE;
@@ -422,9 +424,11 @@ class Indicator extends PanelMenu.Button {
         });
         actions.add_child(copy);
         if (this._cfg.extra.some(k => k.toLowerCase() === p.key.toLowerCase()))
-            actions.add_child(iconButton('list-remove-symbolic', `Parar de monitorar a PR ${p.num}`, () => this._unwatch(p)));
+            actions.add_child(iconButton(act('unwatch'), `Parar de monitorar a PR ${p.num}`, () => this._unwatch(p)));
+            actions.get_last_child().add_style_class_name('prw-btn-danger');
         if (p.conflict && p.state === 'OPEN')
-            actions.add_child(iconButton('document-edit-symbolic', `Resolver o conflito da PR ${p.num} com o Claude`, () => this._resolve(p)));
+            actions.add_child(iconButton(act('resolve'), `Resolver o conflito da PR ${p.num} com o Claude`, () => this._resolve(p)));
+            actions.get_last_child().add_style_class_name('prw-btn-ai');
         if (p.canMerge)
             actions.add_child(this._mergeButton(p));
         row.add_child(actions);
