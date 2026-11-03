@@ -11,7 +11,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {COLUMNS, columnMap, tally, pickActiveSprint, burndownSeries, daysLeft, toJql, epicJql, attachmentUrl, initials, parseChangelogs, kpis, flowEfficiency,
-    similarJql, previewSchema, cardPrompt, mergePreview} from './logic.js';
+    similarJql, previewSchema, cardPrompt, mergePreview, CARD_FIELDS, POINTS} from './logic.js';
 import {runClaude} from './claude.js';
 import {loadConfig, readJson, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 import {lookupToken} from './secret.js';
@@ -30,6 +30,20 @@ const ERRORS = {
     auth: 'Token inválido ou expirado.',
     net: 'Sem conexão com o Jira. Mostrando o último placar.',
 };
+
+const FIELD_NAMES = {type: 'Tipo', sprint: 'Sprint', epic: 'Épico', assignee: 'Responsável', points: 'Pontos', priority: 'Prioridade',
+    description: 'Descrição', criteria: 'Critérios de aceite'};
+const TEXT_FIELDS = ['description', 'criteria'];
+
+// Opções de um campo a partir do contexto do Jira: [[valor, texto]]
+const fieldOptions = (f, ctx) => ({
+    type: ctx.types.map(t => [t, t]),
+    sprint: [...ctx.sprints.map(sp => [String(sp.id), sp.state === 'active' ? `${sp.name} (ativa)` : sp.name]), ['backlog', 'Backlog']],
+    epic: [['', 'Sem épico'], ...ctx.epics.map(e => [e.key, `${e.key} · ${e.summary}`])],
+    assignee: [['', 'Sem responsável'], ...ctx.people.map(p => [p.id, p.name])],
+    points: POINTS.map(n => [n, String(n)]),
+    priority: ctx.priorities.map(p => [p, p]),
+})[f] ?? [];
 
 const day = iso => {
     const d = new Date(iso);
@@ -83,6 +97,24 @@ class Indicator extends PanelMenu.Button {
         this._updatePill();
 
         this.menu.box.add_style_class_name('jw-menu');
+        this._view = 'sprint';
+        this._form = null;
+        // Ctrl+N abre o formulário; Esc no formulário ou na prévia volta para a sprint em vez de fechar.
+        // captured-event ligado antes do PopupMenuManager (que fecha o menu no Esc pelo mesmo sinal).
+        this.menu.actor.connect('captured-event', (_a, ev) => {
+            if (ev.type() !== Clutter.EventType.KEY_PRESS)
+                return Clutter.EVENT_PROPAGATE;
+            const sym = ev.get_key_symbol();
+            if (sym === Clutter.KEY_n && (ev.get_state() & Clutter.ModifierType.CONTROL_MASK)) {
+                this._openForm();
+                return Clutter.EVENT_STOP;
+            }
+            if (sym === Clutter.KEY_Escape && this._view !== 'sprint') {
+                this._showView('sprint');
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
         this._render();
         this.menu.connect('open-state-changed', (_m, open) => {
             // aberto não refaz o conteúdo (apagaria o que está sendo digitado)
@@ -113,6 +145,7 @@ class Indicator extends PanelMenu.Button {
                 this._searchCancel?.cancel();
                 this._prCancel?.cancel();
             }
+            this._tickStrips();
         });
 
         this._monitor = Gio.File.new_for_path(CONFIG_PATH).monitor_file(Gio.FileMonitorFlags.NONE, null);
@@ -327,8 +360,24 @@ class Indicator extends PanelMenu.Button {
         const gear = new St.Button({style_class: 'jw-icon-btn', child: new St.Icon({icon_name: 'emblem-system-symbolic', icon_size: 16}),
             accessible_name: 'Configurar Jira', can_focus: true});
         gear.connect('clicked', () => this._openPrefs());
+        const newCard = new St.Button({style_class: 'jw-new-card', can_focus: true, accessible_name: 'Novo card com o Claude'});
+        const nc = new St.BoxLayout({style_class: 'jw-new-card-box'});
+        nc.add_child(label('✦', 'jw-ai'));
+        nc.add_child(label('Novo card'));
+        newCard.set_child(nc);
+        newCard.connect('clicked', () => this._openForm());
+        header.add_child(newCard);
         header.add_child(gear);
         content.add_child(header);
+
+        if (this._view === 'form') {
+            this._renderForm(content);
+            return;
+        }
+        if (this._view?.draft) {
+            this._renderPreview(content, this._view.draft);
+            return;
+        }
 
         if (error) {
             const box = new St.BoxLayout({vertical: true, style_class: 'jw-notice'});
@@ -345,6 +394,10 @@ class Indicator extends PanelMenu.Button {
         this._search.clutter_text.connect('text-changed', () => this._queueSearch());
         field.add_child(this._search);
         content.add_child(field);
+        this._stripBox = new St.BoxLayout({vertical: true, style_class: 'jw-strips'});
+        this._stripBox.connect('destroy', () => (this._stripBox = null));
+        content.add_child(this._stripBox);
+        this._renderStrips();
 
         this._burndownBox = new St.BoxLayout({vertical: true, style_class: 'jw-block'});
         const bdHead = new St.BoxLayout();
@@ -840,6 +893,204 @@ class Indicator extends PanelMenu.Button {
             this._draftsChanged();
     }
 
+    _showView(view) {
+        this._view = view;
+        this._render();
+        if (view === 'sprint')
+            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                if (this._search?.get_stage())
+                    this._search.grab_key_focus();
+                return GLib.SOURCE_REMOVE;
+            });
+    }
+
+    _openForm() {
+        this._form ??= {text: '', fixed: {}, image: null};
+        this._showView('form');
+        // contexto já em cache deixa os seletores de "Eu defino" prontos
+        if (!this._ctxCache)
+            this._cardContext('').then(() => {
+                if (this._view === 'form' && this.menu.isOpen)
+                    this._render();
+            }).catch(e => console.error(`jira-widget: contexto do card: ${e.message}`));
+    }
+
+    // Botão que mostra o valor atual; clique abre a lista logo abaixo.
+    _choice(options, current, onPick) {
+        const box = new St.BoxLayout({vertical: true, x_expand: true});
+        const cur = options.find(([v]) => v === current)?.[1] ?? 'Escolher';
+        const scroll = new St.ScrollView({style_class: 'jw-pick-scroll', hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC, visible: false});
+        box.add_child(button(`${cur} ▾`, 'jw-pick', () => (scroll.visible = !scroll.visible), {x_align: Clutter.ActorAlign.START}));
+        const list = new St.BoxLayout({vertical: true, style_class: 'jw-pick-list'});
+        for (const [v, text] of options)
+            list.add_child(button(text, `jw-pick-item${v === current ? ' jw-pick-on' : ''}`, () => onPick(v), {x_align: Clutter.ActorAlign.FILL}));
+        scroll.set_child(list);
+        box.add_child(scroll);
+        return box;
+    }
+
+    _multiline(text, hint, onChange) {
+        const e = new St.Entry({text, hint_text: hint, can_focus: true, x_expand: true, style_class: 'jw-input'});
+        e.clutter_text.single_line_mode = false;
+        e.clutter_text.activatable = false;
+        wrap({clutter_text: e.clutter_text});
+        e.clutter_text.connect('text-changed', () => onChange(e.text));
+        return e;
+    }
+
+    _segmented(ai, text, onSet) {
+        const seg = new St.BoxLayout({style_class: 'jw-seg'});
+        seg.add_child(button(text[0], `jw-seg-btn${ai ? ' jw-seg-ai' : ''}`, () => onSet(true)));
+        seg.add_child(button(text[1], `jw-seg-btn${ai ? '' : ' jw-seg-on'}`, () => onSet(false)));
+        return seg;
+    }
+
+    _renderForm(content) {
+        const f = this._form;
+        const head = new St.BoxLayout({style_class: 'jw-header'});
+        head.add_child(label('Novo card', 'jw-title'));
+        head.add_child(label(this._cfg.project || '', 'jw-tag jw-tag-blue'));
+        head.add_child(label('Esc volta', 'jw-muted', {x_expand: true, x_align: Clutter.ActorAlign.END}));
+        content.add_child(head);
+
+        const entry = this._multiline(f.text, 'O que precisa ser feito?', t => {
+            f.text = t;
+            go.reactive = Boolean(t.trim());
+        });
+        entry.add_style_class_name('jw-input-focus');
+        // Ctrl+V com imagem na área de transferência guarda o print para o Claude ler
+        entry.clutter_text.connect('key-press-event', (_a, ev) => {
+            if (ev.get_key_symbol() === Clutter.KEY_v && (ev.get_state() & Clutter.ModifierType.CONTROL_MASK))
+                St.Clipboard.get_default().get_content(St.ClipboardType.CLIPBOARD, 'image/png', (_c, bytes) => {
+                    if (!bytes?.get_size() || this._destroyed)
+                        return;
+                    const path = GLib.build_filenamev([GLib.get_user_cache_dir(), 'jira-widget', `print-${GLib.uuid_string_random()}.png`]);
+                    GLib.file_set_contents(path, bytes.get_data());
+                    if (f.image)
+                        GLib.unlink(f.image);
+                    f.image = path;
+                    if (this._view === 'form')
+                        this._render();
+                });
+            return Clutter.EVENT_PROPAGATE;
+        });
+        content.add_child(entry);
+        const hint = new St.BoxLayout({style_class: 'jw-header'});
+        hint.add_child(label('Uma ou duas frases bastam. Pode colar link de PR, print ou trecho de log.', 'jw-muted', {x_expand: true}));
+        if (f.image)
+            hint.add_child(button('print anexado ✕', 'jw-link', () => {
+                GLib.unlink(f.image);
+                f.image = null;
+                this._render();
+            }));
+        content.add_child(hint);
+
+        const ctx = this._ctxCache?.ctx;
+        const rows = new St.BoxLayout({vertical: true, style_class: 'jw-block jw-form-rows'});
+        for (const k of CARD_FIELDS) {
+            const row = new St.BoxLayout({style_class: 'jw-form-row'});
+            row.add_child(label(FIELD_NAMES[k], 'jw-form-key'));
+            const text = TEXT_FIELDS.includes(k);
+            const ai = !(k in f.fixed);
+            const right = new St.BoxLayout({vertical: true, x_expand: true, style_class: 'jw-form-val'});
+            right.add_child(this._segmented(ai, text ? ['✦ Claude escreve', 'Eu escrevo'] : ['✦ Claude decide', 'Eu defino'], toAi => {
+                if (toAi)
+                    delete f.fixed[k];
+                else if (!(k in f.fixed))
+                    f.fixed[k] = text ? (k === 'criteria' ? [] : '') : fieldOptions(k, ctx ?? {types: [], sprints: [], epics: [], people: [], priorities: []})[0]?.[0] ?? '';
+                this._render();
+            }));
+            if (!ai && text)
+                right.add_child(this._multiline(k === 'criteria' ? f.fixed[k].join('\n') : f.fixed[k], k === 'criteria' ? 'Um critério por linha' : 'Descrição',
+                    t => (f.fixed[k] = k === 'criteria' ? t.split('\n').map(x => x.trim()).filter(Boolean) : t)));
+            else if (!ai)
+                right.add_child(ctx ? this._choice(fieldOptions(k, ctx), f.fixed[k], v => {
+                    f.fixed[k] = v;
+                    this._render();
+                }) : label('Carregando opções do Jira…', 'jw-muted'));
+            row.add_child(right);
+            rows.add_child(row);
+        }
+        content.add_child(rows);
+
+        const foot = new St.BoxLayout({style_class: 'jw-header'});
+        foot.add_child(wrap(label('O Claude consulta o Jira e o código. Nada vai para o Jira sem sua aprovação.', 'jw-muted', {x_expand: true})));
+        const go = button('Gerar prévia', 'jw-primary', () => {
+            if (!f.text.trim())
+                return;
+            this._startDraft(f.text.trim(), f.fixed, f.image);
+            this._form = null;
+            this._showView('sprint');
+        });
+        go.reactive = Boolean(f.text.trim());
+        foot.add_child(go);
+        content.add_child(foot);
+        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            if (entry.get_stage()) {
+                entry.grab_key_focus();
+                entry.clutter_text.set_cursor_position(-1);
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    // Uma faixa por pedido, o mais antigo em cima.
+    _renderStrips() {
+        if (!this._stripBox)
+            return;
+        this._stripBox.destroy_all_children();
+        this._stripBox.visible = this._drafts.length > 0;
+        for (const d of this._drafts) {
+            const strip = new St.BoxLayout({style_class: `jw-strip jw-strip-${d.status}`});
+            strip.add_child(label(d.status === 'error' ? '✦ !' : '✦', d.status === 'error' ? 'jw-ai jw-ai-error' : 'jw-ai'));
+            const title = d.preview?.values.summary ?? d.text;
+            const what = {gen: d.preview ? 'Ajustando' : 'Gerando', ready: 'Prévia pronta', error: 'Falhou'}[d.status];
+            const l = label(`${what} · ${d.status === 'error' ? d.error : title}`, 'jw-strip-text', {x_expand: true});
+            l.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+            strip.add_child(l);
+            if (d.status === 'gen') {
+                d._clock = label(`${Math.round((Date.now() - d.startedAt) / 1000)} s`, 'jw-muted');
+                strip.add_child(d._clock);
+                strip.add_child(button('cancelar', 'jw-link', () => this._cancelDraft(d)));
+            } else if (d.status === 'ready') {
+                strip.add_child(label(`há ${Math.max(1, Math.round((Date.now() - d.readyAt) / 60e3))} min`, 'jw-muted'));
+                strip.add_child(button('Revisar', 'jw-primary', () => this._showView({draft: d})));
+            } else {
+                strip.add_child(button('Descartar', 'jw-link', () => this._dropDraft(d)));
+            }
+            this._stripBox.add_child(strip);
+        }
+    }
+
+    // Relógio das faixas: só anda com o menu aberto e algo gerando.
+    _tickStrips() {
+        if (this._stripTimer || !this.menu.isOpen || !this._drafts.some(d => d.status === 'gen'))
+            return;
+        this._stripTimer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1, () => {
+            const gen = this._drafts.filter(d => d.status === 'gen');
+            for (const d of gen)
+                if (d._clock?.get_stage())
+                    d._clock.text = `${Math.round((Date.now() - d.startedAt) / 1000)} s`;
+            if (this.menu.isOpen && gen.length)
+                return GLib.SOURCE_CONTINUE;
+            this._stripTimer = null;
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _refreshDraftViews() {
+        if (this._view === 'sprint')
+            this._renderStrips();
+        else if (this._view?.draft)
+            this._render();
+        this._tickStrips();
+    }
+
+    // Prévia (Task 5)
+    _renderPreview(content, d) {
+        content.add_child(label(d.preview?.values.summary ?? '', 'jw-title'));
+    }
+
     _cancelDraft(d) {
         d.cancel?.cancel();
     }
@@ -858,13 +1109,15 @@ class Indicator extends PanelMenu.Button {
         if (!this.menu.isOpen)
             this._render();
         else
-            this._refreshDraftViews?.();
+            this._refreshDraftViews();
     }
 
     destroy() {
         this._destroyed = true;
         for (const d of this._drafts)
             d.cancel?.cancel();
+        if (this._stripTimer)
+            GLib.source_remove(this._stripTimer);
         if (this._timer)
             GLib.source_remove(this._timer);
         if (this._debounce)

@@ -89,3 +89,29 @@
 .jw-callout { padding: 8px 10px; border-radius: 3px; background-color: #533f04; color: #f8e6a0; }
 .jw-stale-keys { spacing: 10px; }
 .jw-callout-blue { padding: 8px 10px; border-radius: 3px; background-color: #1c2b41; color: #85b8ff; }
+
+/* novo card com o Claude */
+.jw-new-card { padding: 4px 10px; border-radius: 3px; background-color: rgba(161, 189, 217, 0.08); color: #dee4ea; }
+.jw-new-card:hover, .jw-new-card:focus { background-color: rgba(161, 189, 217, 0.16); }
+.jw-new-card-box { spacing: 6px; }
+.jw-input { background-color: #22272b; border: 1px solid #38414a; border-radius: 3px; padding: 6px 8px; color: #dee4ea; min-height: 30px; }
+.jw-input-focus { border: 2px solid #579dff; min-height: 60px; }
+.jw-form-rows { spacing: 2px; }
+.jw-form-row { spacing: 10px; min-height: 30px; }
+.jw-form-key { width: 140px; color: #b6c2cf; font-weight: 500; }
+.jw-form-val { spacing: 6px; }
+.jw-seg { border: 1px solid #38414a; border-radius: 4px; }
+.jw-seg-btn { padding: 3px 9px; color: #8c9bab; font-size: 0.9em; }
+.jw-seg-on { background-color: #1c2b41; color: #85b8ff; font-weight: 600; }
+.jw-seg-ai { background-color: #3d2a1a; color: #f0a868; font-weight: 600; }
+.jw-pick { padding: 3px 8px; border-radius: 3px; background-color: #2c333a; border: 1px solid #38414a; color: #dee4ea; font-size: 0.9em; }
+.jw-pick-scroll { max-height: 160px; border: 1px solid #38414a; border-radius: 3px; background-color: #1d2125; }
+.jw-pick-item { padding: 4px 8px; color: #b6c2cf; font-size: 0.9em; text-align: left; }
+.jw-pick-item:hover, .jw-pick-item:focus { background-color: rgba(161, 189, 217, 0.08); }
+.jw-pick-on { color: #85b8ff; font-weight: 600; }
+.jw-strips { spacing: 6px; }
+.jw-strip { spacing: 10px; padding: 8px 12px; border-radius: 6px; }
+.jw-strip-text { color: #dee4ea; }
+.jw-strip-ready { background-color: #3d2a1a; border: 1px solid #7a4a24; }
+.jw-strip-gen { background-color: #22272b; border: 1px dashed #7a4a24; }
+.jw-strip-error { background-color: #42221f; border: 1px solid #ae2e24; }
