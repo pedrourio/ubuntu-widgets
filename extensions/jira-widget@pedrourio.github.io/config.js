@@ -17,7 +17,9 @@ const DEFAULTS = {
     githubLogin: '', // seu usuário no GitHub (métricas de entrega)
     teamGithub: [], // usuários do GitHub do time, na mesma lógica de "team"
     deployHead: 'base', // branch de integração; um deploy é uma PR dela para deployBases
-    deployBases: ['master', 'main'], // campo de Story Points do site (customfield_…); vazio = burndown pelo padrão do Jira
+    deployBases: ['master', 'main'],
+    codeDir: '', // pasta onde o Claude lê código para escrever um card novo; vazio = home
+    cardGuide: '', // arquivo opcional com o modelo de card do time // campo de Story Points do site (customfield_…); vazio = burndown pelo padrão do Jira
 };
 
 export function readJson(path, fallback) {

@@ -10,7 +10,9 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
-import {COLUMNS, columnMap, tally, pickActiveSprint, burndownSeries, daysLeft, toJql, epicJql, attachmentUrl, initials, parseChangelogs, kpis, flowEfficiency} from './logic.js';
+import {COLUMNS, columnMap, tally, pickActiveSprint, burndownSeries, daysLeft, toJql, epicJql, attachmentUrl, initials, parseChangelogs, kpis, flowEfficiency,
+    similarJql, previewSchema, cardPrompt, mergePreview} from './logic.js';
+import {runClaude} from './claude.js';
 import {loadConfig, readJson, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 import {lookupToken} from './secret.js';
 import {JiraClient} from './jira.js';
@@ -59,6 +61,7 @@ class Indicator extends PanelMenu.Button {
         this._ext = ext;
         this._cfg = loadConfig();
         this._prCache = new Map();
+        this._drafts = []; // pedidos de card ao Claude; só em memória
         // Barra aparece com o último valor conhecido antes de qualquer rede.
         this._state = {sprint: null, counts: null, burndown: null, error: null, updatedAt: null, me: null, board: null, boardAt: 0, ...readJson(CACHE_PATH, {})};
         this._state.error = null;
@@ -74,6 +77,8 @@ class Indicator extends PanelMenu.Button {
             kda.add_child(this._lz[c]);
         }
         box.add_child(kda);
+        this._aiLabel = label('✦', 'jw-ai', {visible: false});
+        box.add_child(this._aiLabel);
         this.add_child(box);
         this._updatePill();
 
@@ -274,6 +279,17 @@ class Indicator extends PanelMenu.Button {
             this._lz[c].text = String(counts?.[c] ?? 0);
             this._lz[c].visible = Boolean(counts);
         }
+        // ✦ só com pedido de card: erro > prévias prontas > gerando (pulsa)
+        const err = this._drafts.some(d => d.status === 'error');
+        const ready = this._drafts.filter(d => d.status === 'ready').length;
+        const gen = this._drafts.some(d => d.status === 'gen');
+        this._aiLabel.visible = this._drafts.length > 0;
+        this._aiLabel.text = err ? '✦ !' : ready ? `✦ ${ready}` : '✦';
+        this._aiLabel.style_class = err ? 'jw-ai jw-ai-error' : ready ? 'jw-ai jw-ai-ready' : 'jw-ai';
+        this._aiLabel.remove_all_transitions();
+        this._aiLabel.opacity = 255;
+        if (gen && !err && !ready)
+            this._aiLabel.ease({opacity: 90, duration: 800, mode: Clutter.AnimationMode.EASE_IN_OUT_SINE, repeatCount: -1, autoReverse: true});
         // valor velho continua visível, mas apagado
         if (error)
             this.add_style_class_name('jw-stale');
@@ -734,8 +750,121 @@ class Indicator extends PanelMenu.Button {
             row.actions.add_child(button(`Abrir PR #${open.num}`, 'jw-secondary', () => this._launch(open.url)));
     }
 
+    // Listas que o Claude pode escolher; tudo menos os parecidos fica 1 h em memória.
+    async _cardContext(text) {
+        if (!await this._getClient())
+            throw new Error('sem token do Jira');
+        const c = this._client;
+        const cfg = this._cfg;
+        if (!this._ctxCache || Date.now() - this._ctxCache.at > 3600e3) {
+            const me = this._state.me ?? (await c.request('/rest/api/3/myself')).accountId;
+            const ids = [me, ...(cfg.team ?? [])].map(i => `accountId=${encodeURIComponent(i)}`).join('&');
+            const [sprints, epics, users, meta, priorities] = await Promise.all([
+                c.request(`/rest/agile/1.0/board/${cfg.boardId}/sprint`, {state: 'active,future'}),
+                this._pages(`project = ${cfg.project} AND issuetype = Epic AND statusCategory != Done ORDER BY updated DESC`, 'summary'),
+                c.request(`/rest/api/3/user/bulk?${ids}`),
+                c.request(`/rest/api/3/issue/createmeta/${cfg.project}/issuetypes`),
+                c.request('/rest/api/3/priority'),
+            ]);
+            this._ctxCache = {at: Date.now(), ctx: {
+                types: (meta.issueTypes ?? meta.values ?? []).filter(t => !t.subtask).map(t => t.name),
+                priorities: priorities.map(p => p.name),
+                sprints: sprints.values.map(sp => ({id: sp.id, name: sp.name, state: sp.state})),
+                epics: epics.map(e => ({key: e.key, summary: e.fields.summary})),
+                people: users.values.map(u => ({id: u.accountId, name: u.displayName})),
+            }};
+        }
+        const jql = similarJql(text, cfg.project);
+        const similar = jql ? (await c.request('/rest/api/3/search/jql', {jql, maxResults: 5,
+            fields: ['summary', 'issuetype', 'parent', cfg.pointsField].filter(Boolean).join(',')})).issues : [];
+        return {...this._ctxCache.ctx, similar: similar.map(i => ({key: i.key, summary: i.fields.summary, type: i.fields.issuetype?.name,
+            epic: i.fields.parent?.key ?? null, points: cfg.pointsField ? i.fields[cfg.pointsField] ?? null : null}))};
+    }
+
+    _guide() {
+        if (!this._cfg.cardGuide)
+            return '';
+        try {
+            return new TextDecoder().decode(GLib.file_get_contents(this._cfg.cardGuide)[1]);
+        } catch {
+            return '';
+        }
+    }
+
+    _startDraft(text, fixed, image) {
+        const d = {id: GLib.uuid_string_random(), text, fixed, image, edited: {}, status: 'gen', startedAt: Date.now(), sessionId: null, preview: null, error: null, ctx: null};
+        this._drafts.push(d);
+        this._runDraft(d, async () => {
+            d.ctx = await this._cardContext(text);
+            return runClaude({prompt: cardPrompt({text, fixed, ctx: d.ctx, guide: this._guide(), image}), schema: previewSchema(d.ctx),
+                cwd: this._cfg.codeDir, cancellable: d.cancel});
+        });
+    }
+
+    // Retoma a mesma conversa; o que você fixou ou editou volta como fixado e a mescla garante.
+    _adjustDraft(d, message) {
+        const fixed = {...d.fixed, ...d.edited};
+        this._runDraft(d, () => runClaude({prompt: `Ajuste pedido: ${message}\nCampos fixados (não mude, devolva o mesmo valor): ${JSON.stringify(fixed)}`,
+            schema: previewSchema(d.ctx), cwd: this._cfg.codeDir, resume: d.sessionId, cancellable: d.cancel}));
+    }
+
+    async _runDraft(d, run) {
+        d.cancel = new Gio.Cancellable();
+        d.status = 'gen';
+        d.startedAt = Date.now();
+        d.error = null;
+        this._draftsChanged();
+        try {
+            const {sessionId, output} = await run();
+            d.sessionId = sessionId;
+            d.preview = mergePreview(output, {...d.fixed, ...d.edited}, d.ctx);
+            d.status = 'ready';
+            d.readyAt = Date.now();
+            Main.notify('Prévia do card pronta', d.preview.values.summary);
+        } catch (e) {
+            if (this._destroyed || !this._drafts.includes(d))
+                return;
+            // ajuste que falhou ou foi cancelado volta para a prévia anterior
+            if (d.preview) {
+                d.status = 'ready';
+                d.error = d.cancel.is_cancelled() ? null : e.message;
+            } else if (d.cancel.is_cancelled()) {
+                this._dropDraft(d);
+                return;
+            } else {
+                d.status = 'error';
+                d.error = e.message;
+            }
+        }
+        if (!this._destroyed)
+            this._draftsChanged();
+    }
+
+    _cancelDraft(d) {
+        d.cancel?.cancel();
+    }
+
+    _dropDraft(d) {
+        d.cancel?.cancel();
+        this._drafts = this._drafts.filter(x => x !== d);
+        if (d.image)
+            GLib.unlink(d.image);
+        this._draftsChanged();
+    }
+
+    // Menu aberto: só as faixas e a prévia em tela mudam (refazer tudo apagaria a busca digitada).
+    _draftsChanged() {
+        this._updatePill();
+        if (!this.menu.isOpen)
+            this._render();
+        else
+            this._refreshDraftViews?.();
+    }
+
     destroy() {
         this._destroyed = true;
+        for (const d of this._drafts)
+            d.cancel?.cancel();
         if (this._timer)
             GLib.source_remove(this._timer);
         if (this._debounce)

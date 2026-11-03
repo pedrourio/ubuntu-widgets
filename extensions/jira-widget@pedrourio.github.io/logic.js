@@ -269,6 +269,7 @@ ${guide || DEFAULT_GUIDE}
 ${guide ? 'Dê em "score" a nota do card nessa régua.' : ''}
 Use Read, Grep e Glob para achar onde isso está no código e cite o caminho na descrição.
 Os cards em "similar" ajudam a escolher épico e pontos.
+Descrição e critérios em texto simples, sem markdown: parágrafos separados por linha em branco.
 Explique em "why" cada campo que você escolheu, em até 10 palavras. Responda em português.`;
 }
 

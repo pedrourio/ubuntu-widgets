@@ -10,6 +10,9 @@
 .jw-testing { background-color: #1d474c; color: #9dd9ee; }
 .jw-deploy { background-color: #50253f; color: #fdd0ec; }
 .jw-done { background-color: #164b35; color: #7ee2b8; }
+.jw-ai { color: #f0a868; font-weight: bold; }
+.jw-ai-ready { background-color: #e0823d; color: #1d2125; border-radius: 99px; padding: 0 6px; font-size: 0.85em; }
+.jw-ai-error { color: #f87168; }
 .jw-stale .jw-kda, .jw-stale .jw-sprint { opacity: 0.55; }
 
 /* menu: padrão Jira (Atlassian dark) */
