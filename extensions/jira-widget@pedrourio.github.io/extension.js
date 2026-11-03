@@ -867,9 +867,11 @@ class Indicator extends PanelMenu.Button {
         d.status = 'gen';
         d.startedAt = Date.now();
         d.error = null;
-        this._draftsChanged();
+        this._draftsChanged(d);
         try {
             const {sessionId, output} = await run();
+            if (this._destroyed || !this._drafts.includes(d))
+                return;
             d.sessionId = sessionId;
             d.preview = mergePreview(output, {...d.fixed, ...d.edited}, d.ctx);
             d.status = 'ready';
@@ -891,7 +893,7 @@ class Indicator extends PanelMenu.Button {
             }
         }
         if (!this._destroyed)
-            this._draftsChanged();
+            this._draftsChanged(d);
     }
 
     _showView(view) {
@@ -1079,10 +1081,11 @@ class Indicator extends PanelMenu.Button {
         });
     }
 
-    _refreshDraftViews() {
+    // Só refaz a prévia em tela se foi ela que mudou (refazer tira o foco de quem está digitando).
+    _refreshDraftViews(changed) {
         if (this._view === 'sprint')
             this._renderStrips();
-        else if (this._view?.draft)
+        else if (this._view?.draft && this._view.draft === changed)
             this._render();
         this._tickStrips();
     }
@@ -1145,10 +1148,13 @@ class Indicator extends PanelMenu.Button {
         }
 
         const adjust = new St.BoxLayout({style_class: 'jw-header'});
-        const ask = new St.Entry({hint_text: 'Pedir ajuste ao Claude… ex.: “é história, não bug”', can_focus: true, x_expand: true, style_class: 'jw-input'});
+        const ask = new St.Entry({text: d.askText ?? '', hint_text: 'Pedir ajuste ao Claude… ex.: “é história, não bug”', can_focus: true, x_expand: true, style_class: 'jw-input'});
+        ask.clutter_text.connect('text-changed', () => (d.askText = ask.text));
         const send = () => {
-            if (ask.text.trim() && d.status !== 'gen')
+            if (ask.text.trim() && d.status !== 'gen') {
+                d.askText = '';
                 this._adjustDraft(d, ask.text.trim());
+            }
         };
         ask.clutter_text.connect('activate', send);
         adjust.add_child(ask);
@@ -1174,10 +1180,20 @@ class Indicator extends PanelMenu.Button {
         d.error = null;
         this._render();
         const v = d.preview.values;
+        let key;
         try {
             if (!await this._getClient())
                 throw new Error('Sem token do Jira.');
-            const {key} = await this._client.post('/rest/api/3/issue', issueBody(v, this._cfg));
+            key = (await this._client.post('/rest/api/3/issue', issueBody(v, this._cfg))).key;
+        } catch (e) {
+            d.publishing = false;
+            d.error = `Não publicou: ${e.message}`;
+            if (!this._destroyed && this._view?.draft === d)
+                this._render();
+            return;
+        }
+        // card já existe: daqui em diante nada pode voltar para "Não publicou" (outro clique duplicaria)
+        try {
             let warn = '';
             if (/^\d+$/.test(v.sprint)) {
                 try {
@@ -1190,16 +1206,12 @@ class Indicator extends PanelMenu.Button {
             const n = new MessageTray.Notification({source, title: `Card ${key} criado${warn}`, body: v.summary});
             n.addAction('Abrir no Jira', () => this._launch(this._browse(key)));
             source.addNotification(n);
-            d.publishing = false;
-            this._dropDraft(d);
-            if (this._view?.draft === d)
-                this._showView('sprint');
         } catch (e) {
-            d.publishing = false;
-            d.error = `Não publicou: ${e.message}`;
-            if (!this._destroyed && this._view?.draft === d)
-                this._render();
+            console.error(`jira-widget: card ${key} criado, aviso falhou: ${e.message}`);
         }
+        this._dropDraft(d);
+        if (this._view?.draft === d)
+            this._showView('sprint');
     }
 
     _cancelDraft(d) {
@@ -1215,18 +1227,24 @@ class Indicator extends PanelMenu.Button {
     }
 
     // Menu aberto: só as faixas e a prévia em tela mudam (refazer tudo apagaria a busca digitada).
-    _draftsChanged() {
+    _draftsChanged(d = null) {
         this._updatePill();
         if (!this.menu.isOpen)
             this._render();
         else
-            this._refreshDraftViews();
+            this._refreshDraftViews(d);
     }
 
     destroy() {
         this._destroyed = true;
-        for (const d of this._drafts)
+        // prints colados podem ter dado sensível: não ficam no cache
+        for (const d of this._drafts) {
             d.cancel?.cancel();
+            if (d.image)
+                GLib.unlink(d.image);
+        }
+        if (this._form?.image)
+            GLib.unlink(this._form.image);
         if (this._stripTimer)
             GLib.source_remove(this._stripTimer);
         if (this._timer)

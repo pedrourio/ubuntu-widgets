@@ -7,8 +7,10 @@ export function runClaude({prompt, schema, cwd, resume = null, cancellable = nul
     const bin = GLib.find_program_in_path('claude') ?? GLib.build_filenamev([GLib.get_home_dir(), '.local/bin/claude']);
     if (!GLib.file_test(bin, GLib.FileTest.IS_EXECUTABLE))
         return Promise.reject(new Error('claude não encontrado'));
+    // --tools só limita as ferramentas internas; --strict-mcp-config tira os servidores MCP do usuário
+    // (shell, criar card no Jira), que o texto de terceiros no prompt poderia acionar.
     // prompt antes de --tools: a opção aceita vários valores e engoliria o que vem depois
-    const argv = [bin, '-p', prompt, '--output-format', 'json', '--json-schema', JSON.stringify(schema),
+    const argv = [bin, '-p', prompt, '--output-format', 'json', '--json-schema', JSON.stringify(schema), '--strict-mcp-config',
         ...(resume ? ['--resume', resume] : []), '--tools', 'Read', 'Grep', 'Glob'];
     const launcher = new Gio.SubprocessLauncher({flags: Gio.SubprocessFlags.STDIN_PIPE | Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE});
     launcher.set_cwd(cwd || GLib.get_home_dir());
@@ -20,9 +22,10 @@ export function runClaude({prompt, schema, cwd, resume = null, cancellable = nul
             reject(new Error(e.message));
             return;
         }
+        // SIGTERM: o claude encerra os próprios filhos
         const stop = reason => {
             why = reason;
-            proc.force_exit();
+            proc.send_signal(15);
         };
         let timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, timeoutSec, () => {
             timer = 0;
