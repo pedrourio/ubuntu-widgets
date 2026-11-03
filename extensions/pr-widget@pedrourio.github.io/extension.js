@@ -469,7 +469,7 @@ class Indicator extends PanelMenu.Button {
     _resolve(p) {
         const [repo, num] = p.key.split('#');
         try {
-            Gio.Subprocess.new(['ptyxis', '-s', '-T', `Conflito ${p.repo} #${num}`, '--', 'pr-resolve', repo, num], Gio.SubprocessFlags.NONE);
+            Gio.Subprocess.new(['ptyxis', '-s', '-T', `Conflito ${p.repo} #${num}`, '--', GLib.build_filenamev([GLib.get_home_dir(), '.local/bin/pr-resolve']), repo, num], Gio.SubprocessFlags.NONE);
             this.menu.close();
         } catch (e) {
             Main.notifyError('Não abriu o terminal', e.message);

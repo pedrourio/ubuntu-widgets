@@ -2,6 +2,7 @@
 # Resolve o conflito de uma PR com o Claude: clone temporário, junta a base, o Claude edita os arquivos,
 # este script confere, commita o merge e faz push. Uso: pr-resolve dono/repo número
 set -euo pipefail
+export PATH="$HOME/.local/bin:$PATH"  # aberto pelo GNOME Shell, que não tem ~/.local/bin no PATH
 repo=$1 num=$2
 dir=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/pr-resolve.XXXXXX")
 trap 'rm -rf "$dir"' EXIT
