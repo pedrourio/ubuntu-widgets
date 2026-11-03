@@ -115,3 +115,6 @@
 .jw-strip-ready { background-color: #3d2a1a; border: 1px solid #7a4a24; }
 .jw-strip-gen { background-color: #22272b; border: 1px dashed #7a4a24; }
 .jw-strip-error { background-color: #42221f; border: 1px solid #ae2e24; }
+.jw-tag-wait { background-color: #533f04; color: #f5cd47; }
+.jw-preview-title { font-size: 1.15em; font-weight: 600; }
+.jw-danger { color: #f87168; }

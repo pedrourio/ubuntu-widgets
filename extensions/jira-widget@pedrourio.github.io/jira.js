@@ -35,9 +35,17 @@ export class JiraClient {
                 try {
                     const bytes = s.send_and_read_finish(res);
                     const status = msg.get_status();
-                    if (status >= 400)
-                        throw new JiraError(status, `Jira respondeu ${status} em ${path}`);
-                    resolve(JSON.parse(new TextDecoder().decode(bytes.get_data())));
+                    const text = new TextDecoder().decode(bytes.get_data());
+                    if (status >= 400) {
+                        // detalhe do Jira (campo inválido etc.); a resposta nunca traz o token
+                        let detail = '';
+                        try {
+                            const j = JSON.parse(text);
+                            detail = [...(j.errorMessages ?? []), ...Object.entries(j.errors ?? {}).map(([k, m]) => `${k}: ${m}`)].join('; ');
+                        } catch {}
+                        throw new JiraError(status, `Jira respondeu ${status} em ${path}${detail ? `: ${detail}` : ''}`);
+                    }
+                    resolve(text ? JSON.parse(text) : {});
                 } catch (e) {
                     reject(e instanceof JiraError ? e : new JiraError(0, e.message));
                 }

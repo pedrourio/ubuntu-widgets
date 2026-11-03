@@ -73,6 +73,8 @@ Abaixo do burndown, primeiro o bloco **Entrega (últimos 30 dias)**, você × m�
 
 Depois, os **KPIs seus × média do time** (`team` no config): estágios de entrega (pós-dev = Ready to Test em diante, pronto = Ready to Deploy em diante, done = só Done), horas por card em cada coluna nesta sprint (com destaque na coluna em que você mais passa do time) e cards parados há mais de 2 dias. O histórico de status vem de `POST /rest/api/3/changelog/bulkfetch`, numa chamada para a sprint inteira.
 
+**Novo card com o Claude:** o botão **✦ Novo card** no cabeçalho (ou `Ctrl+N` com o menu aberto) abre um formulário: uma ou duas frases sobre o problema (aceita link de PR, trecho de log ou print colado com `Ctrl+V`) e, para cada campo (tipo, sprint, épico, responsável, pontos, prioridade, descrição, critérios de aceite), "Claude decide" ou "Eu defino". O widget busca no Jira as sprints, épicos abertos, o time e até 5 cards parecidos e roda `claude -p` na pasta `codeDir`, só com ferramentas de leitura; o Claude escolhe dentro dessas listas e devolve a prévia. Enquanto gera, a barra mostra ✦ (pulsando), depois ✦ N (prévias prontas) ou ✦ ! (falhou), e uma faixa abaixo da busca leva à prévia. Na prévia tudo é editável (editar tira o ✦ e o Claude não mexe mais naquele campo), o campo de ajuste pede mudanças ao Claude na mesma conversa, e só **Publicar no Jira** cria o card (com a sprint, se escolhida). Pedidos pendentes ficam só em memória: recarregar o shell perde.
+
 Custo: uma consulta pequena a cada `intervalMinutes` (padrão 15) para placar e burndown; abrir o menu não consulta nada; a busca espera 400 ms sem digitar e cancela a anterior; PRs só do card aberto.
 
 Config em `~/.config/jira-widget/config.json` (ou pela engrenagem do menu):
@@ -89,6 +91,8 @@ Config em `~/.config/jira-widget/config.json` (ou pela engrenagem do menu):
 | `intervalMinutes` | intervalo do placar, padrão 15 |
 | `team` | accountIds de quem entra na média do time nos KPIs |
 | `githubLogin`, `teamGithub` | seu usuário e os do time no GitHub (bloco Entrega) |
+| `codeDir` | pasta onde o Claude lê código para escrever um card novo (padrão: home) |
+| `cardGuide` | arquivo opcional com o modelo de card do time (seções, critérios, régua); com ele, a prévia mostra a nota |
 | `deployHead`, `deployBases` | branch de integração e as de produção (padrão `base` → `master`/`main`) |
 
 Token de API: gere em https://id.atlassian.com/manage-profile/security/api-tokens e cole nas preferências (engrenagem do menu) ou rode `jira-token`. Fica no chaveiro (libsecret), nunca em arquivo.

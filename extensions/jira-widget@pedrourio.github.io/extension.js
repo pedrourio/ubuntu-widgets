@@ -9,9 +9,10 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {COLUMNS, columnMap, tally, pickActiveSprint, burndownSeries, daysLeft, toJql, epicJql, attachmentUrl, initials, parseChangelogs, kpis, flowEfficiency,
-    similarJql, previewSchema, cardPrompt, mergePreview, CARD_FIELDS, POINTS} from './logic.js';
+    similarJql, previewSchema, cardPrompt, mergePreview, issueBody, CARD_FIELDS, POINTS} from './logic.js';
 import {runClaude} from './claude.js';
 import {loadConfig, readJson, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 import {lookupToken} from './secret.js';
@@ -1086,9 +1087,119 @@ class Indicator extends PanelMenu.Button {
         this._tickStrips();
     }
 
-    // Prévia (Task 5)
+    // Prévia editável: editar um campo tira o ✦ e o fixa para os próximos ajustes; nada chama o Claude sozinho.
     _renderPreview(content, d) {
-        content.add_child(label(d.preview?.values.summary ?? '', 'jw-title'));
+        const p = d.preview;
+        const v = p.values;
+        const edit = (k, val) => {
+            v[k] = val;
+            p.ai.delete(k);
+            d.edited[k] = val;
+        };
+        const head = new St.BoxLayout({style_class: 'jw-header'});
+        head.add_child(label('AGUARDANDO APROVAÇÃO', 'jw-tag jw-tag-wait'));
+        head.add_child(label(p.score ? `nota ${p.score.value}/${p.score.max} na régua de card` : '', 'jw-muted', {x_expand: true, x_align: Clutter.ActorAlign.END}));
+        content.add_child(head);
+        if (d.status === 'gen' || d.error) {
+            const box = new St.BoxLayout({style_class: 'jw-notice'});
+            box.add_child(wrap(label(d.status === 'gen' ? 'Ajustando com o Claude…' : d.error, 'jw-notice-text', {x_expand: true})));
+            if (d.status === 'gen')
+                box.add_child(button('cancelar', 'jw-link', () => this._cancelDraft(d)));
+            content.add_child(box);
+        }
+
+        const title = new St.Entry({text: v.summary, can_focus: true, x_expand: true, style_class: 'jw-input jw-preview-title'});
+        title.clutter_text.connect('text-changed', () => edit('summary', title.text));
+        content.add_child(title);
+
+        const grid = new St.BoxLayout({vertical: true, style_class: 'jw-block jw-form-rows'});
+        for (const k of ['type', 'sprint', 'epic', 'assignee', 'points', 'priority']) {
+            const row = new St.BoxLayout({style_class: 'jw-form-row'});
+            const key = new St.BoxLayout({style_class: 'jw-form-key'});
+            if (p.ai.has(k))
+                key.add_child(label('✦ ', 'jw-ai'));
+            key.add_child(label(FIELD_NAMES[k]));
+            row.add_child(key);
+            row.add_child(this._choice(fieldOptions(k, d.ctx), v[k], val => {
+                edit(k, val);
+                this._render();
+            }));
+            grid.add_child(row);
+        }
+        content.add_child(grid);
+
+        const desc = new St.BoxLayout({vertical: true, style_class: 'jw-block'});
+        desc.add_child(label(`${p.ai.has('description') ? '✦ ' : ''}Descrição`, 'jw-block-title'));
+        desc.add_child(this._multiline(v.description, 'Descrição', t => edit('description', t)));
+        desc.add_child(label(`${p.ai.has('criteria') ? '✦ ' : ''}Critérios de aceite (um por linha)`, 'jw-block-title'));
+        desc.add_child(this._multiline(v.criteria.join('\n'), 'Um critério por linha', t => edit('criteria', t.split('\n').map(x => x.trim()).filter(Boolean))));
+        content.add_child(desc);
+
+        const reasons = [...p.ai].filter(k => p.why[k]);
+        if (reasons.length) {
+            const why = new St.BoxLayout({vertical: true, style_class: 'jw-block'});
+            why.add_child(label('Por que o Claude escolheu', 'jw-block-title'));
+            for (const k of reasons)
+                why.add_child(wrap(label(`${FIELD_NAMES[k]}: ${p.why[k]}`, 'jw-muted')));
+            content.add_child(why);
+        }
+
+        const adjust = new St.BoxLayout({style_class: 'jw-header'});
+        const ask = new St.Entry({hint_text: 'Pedir ajuste ao Claude… ex.: “é história, não bug”', can_focus: true, x_expand: true, style_class: 'jw-input'});
+        const send = () => {
+            if (ask.text.trim() && d.status !== 'gen')
+                this._adjustDraft(d, ask.text.trim());
+        };
+        ask.clutter_text.connect('activate', send);
+        adjust.add_child(ask);
+        adjust.add_child(button('Enviar', 'jw-primary', send));
+        content.add_child(adjust);
+
+        const foot = new St.BoxLayout({style_class: 'jw-header'});
+        foot.add_child(button('Descartar', 'jw-link jw-danger', () => {
+            this._dropDraft(d);
+            this._showView('sprint');
+        }, {x_expand: true, x_align: Clutter.ActorAlign.START}));
+        const pub = button(d.publishing ? 'Publicando…' : 'Publicar no Jira', 'jw-primary', () => this._publish(d));
+        pub.reactive = !d.publishing && d.status !== 'gen' && Boolean(v.summary.trim() && v.type);
+        foot.add_child(pub);
+        content.add_child(foot);
+    }
+
+    // Cria o card e, se houver, põe na sprint; falhar mantém a prévia. publishing impede card duplicado.
+    async _publish(d) {
+        if (d.publishing)
+            return;
+        d.publishing = true;
+        d.error = null;
+        this._render();
+        const v = d.preview.values;
+        try {
+            if (!await this._getClient())
+                throw new Error('Sem token do Jira.');
+            const {key} = await this._client.post('/rest/api/3/issue', issueBody(v, this._cfg));
+            let warn = '';
+            if (/^\d+$/.test(v.sprint)) {
+                try {
+                    await this._client.post(`/rest/agile/1.0/sprint/${v.sprint}/issue`, {issues: [key]});
+                } catch {
+                    warn = ', mas não entrou na sprint';
+                }
+            }
+            const source = MessageTray.getSystemSource();
+            const n = new MessageTray.Notification({source, title: `Card ${key} criado${warn}`, body: v.summary});
+            n.addAction('Abrir no Jira', () => this._launch(this._browse(key)));
+            source.addNotification(n);
+            d.publishing = false;
+            this._dropDraft(d);
+            if (this._view?.draft === d)
+                this._showView('sprint');
+        } catch (e) {
+            d.publishing = false;
+            d.error = `Não publicou: ${e.message}`;
+            if (!this._destroyed && this._view?.draft === d)
+                this._render();
+        }
     }
 
     _cancelDraft(d) {
