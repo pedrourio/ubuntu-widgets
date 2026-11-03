@@ -7,6 +7,7 @@ Extensões pequenas para a barra do topo do GNOME Shell 50 (Wayland), feitas par
 | `pr-widget` | Suas PRs abertas no GitHub: contadores na barra (pedem sua resposta, aguardando o reviewer, prontas para merge, com conflito) e um menu com grupos, status do reviewer autônomo, abrir PR e copiar link. |
 | `pr-status` + skill do Claude Code | O mesmo status das PRs no terminal (`pr-status [--view status\|group] [busca]`) e a skill `pr-status`, que faz o Claude consultar por ele. Usa o mesmo `logic.js` do widget. |
 | `screensaver` | Tela de descanso no estilo do Omarchy: depois de alguns minutos parado, um terminal em tela cheia anima o símbolo `</>` com o TerminalTextEffects. |
+| `printmark` | Fora do shell (Rust + GTK4): o `Print` abre a captura nativa do GNOME, que pega todos os monitores, e depois um editor para marcar a imagem (seta, retângulo, texto, tarja) e copiar. Compilação, atalho e teclas em [`printmark/README.md`](printmark/README.md). |
 | `bt-headset-battery` | Ícone do fone Bluetooth conectado com barra e porcentagem de bateria (lida do UPower). |
 
 ## Instalar
