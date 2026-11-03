@@ -218,3 +218,100 @@ export function flowEfficiency(cards, hist, colMap, me, team) {
     const others = team.map(id => personFlow(of(id), hist, colMap)).filter(p => p.n);
     return {me: personFlow(of(me), hist, colMap), team: others.length ? {ratio: meanOf(others, 'ratio')} : null};
 }
+
+// Novo card com o Claude: o Claude só propõe; estas regras conferem a proposta e montam o POST.
+export const CARD_FIELDS = ['type', 'sprint', 'epic', 'assignee', 'points', 'priority', 'description', 'criteria'];
+export const POINTS = [1, 2, 3, 5, 8, 13];
+
+const escapeJql = text => text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+// Até 4 palavras com 4+ letras, maiores primeiro (sort estável mantém a ordem do texto no empate).
+export function similarJql(text, project) {
+    const words = [...new Set((text ?? '').match(/[\p{L}\d]{4,}/gu) ?? [])].sort((a, b) => b.length - a.length).slice(0, 4);
+    return words.length ? `project = ${project} AND text ~ "${escapeJql(words.join(' '))}" ORDER BY updated DESC` : null;
+}
+
+export function previewSchema(ctx) {
+    const str = {type: 'string'};
+    return {
+        type: 'object',
+        properties: {
+            summary: str,
+            type: {type: 'string', enum: ctx.types},
+            sprint: {type: 'string', enum: [...ctx.sprints.map(s => String(s.id)), 'backlog']},
+            epic: {type: 'string', enum: [...ctx.epics.map(e => e.key), '']},
+            assignee: {type: 'string', enum: [...ctx.people.map(p => p.id), '']},
+            points: {type: 'integer', enum: POINTS},
+            priority: {type: 'string', enum: ctx.priorities},
+            description: str,
+            criteria: {type: 'array', items: str},
+            why: {type: 'object', properties: Object.fromEntries(CARD_FIELDS.map(f => [f, str]))},
+            score: {type: 'object', properties: {value: {type: 'integer'}, max: {type: 'integer'}}, required: ['value', 'max']},
+        },
+        required: ['summary', 'type', 'description', 'criteria'],
+    };
+}
+
+const DEFAULT_GUIDE = `Descrição em três partes curtas: contexto, comportamento atual, comportamento esperado.
+Critérios de aceite no formato "Dado …, quando …, então …", um por item, verificáveis por quem testa.`;
+
+export function cardPrompt({text, fixed, ctx, guide, image}) {
+    return `Escreva um card de Jira para este pedido:
+"""${text}"""
+${image ? `Há um print do problema em ${image}; leia com a ferramenta Read.\n` : ''}
+Escolha só entre as opções abaixo (ids e chaves exatos):
+${JSON.stringify(ctx, null, 1)}
+
+Campos já definidos (não mude estes campos, devolva o mesmo valor): ${JSON.stringify(fixed)}
+
+Modelo do card:
+${guide || DEFAULT_GUIDE}
+${guide ? 'Dê em "score" a nota do card nessa régua.' : ''}
+Use Read, Grep e Glob para achar onde isso está no código e cite o caminho na descrição.
+Os cards em "similar" ajudam a escolher épico e pontos.
+Explique em "why" cada campo que você escolheu, em até 10 palavras. Responda em português.`;
+}
+
+const pick = (v, allowed) => (allowed.includes(v) ? v : null);
+
+export function mergePreview(out, fixed, ctx) {
+    const merged = {...out, ...fixed};
+    const values = {
+        summary: merged.summary ?? '',
+        type: pick(merged.type, ctx.types),
+        sprint: pick(String(merged.sprint ?? ''), [...ctx.sprints.map(s => String(s.id)), 'backlog']) ?? '',
+        epic: pick(merged.epic, ctx.epics.map(e => e.key)) ?? '',
+        assignee: pick(merged.assignee, ctx.people.map(p => p.id)) ?? '',
+        points: pick(merged.points, POINTS),
+        priority: pick(merged.priority, ctx.priorities),
+        description: merged.description ?? '',
+        criteria: merged.criteria ?? [],
+    };
+    const ai = new Set(CARD_FIELDS.filter(f => !(f in fixed) && values[f] !== null && values[f] !== '' && !(Array.isArray(values[f]) && !values[f].length)));
+    return {values, ai, why: out.why ?? {}, score: out.score ?? null};
+}
+
+const para = t => ({type: 'paragraph', content: [{type: 'text', text: t}]});
+
+export function toAdf(description, criteria) {
+    const paras = description.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).map(para);
+    const content = [...paras];
+    if (criteria.length) {
+        content.push({type: 'heading', attrs: {level: 3}, content: [{type: 'text', text: 'Critérios de aceite'}]});
+        content.push({type: 'orderedList', content: criteria.map(c => ({type: 'listItem', content: [para(c)]}))});
+    }
+    return {type: 'doc', version: 1, content};
+}
+
+export function issueBody(values, {project, pointsField}) {
+    const fields = {project: {key: project}, summary: values.summary, issuetype: {name: values.type}, description: toAdf(values.description, values.criteria)};
+    if (values.epic)
+        fields.parent = {key: values.epic};
+    if (values.assignee)
+        fields.assignee = {accountId: values.assignee};
+    if (values.priority)
+        fields.priority = {name: values.priority};
+    if (pointsField && values.points != null)
+        fields[pointsField] = values.points;
+    return {fields};
+}

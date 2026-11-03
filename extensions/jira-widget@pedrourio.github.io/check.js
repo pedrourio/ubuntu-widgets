@@ -1,5 +1,6 @@
 // gjs -m check.js  → falha com exceção se alguma regra de logic.js quebrar.
-import {COLUMNS, columnMap, tally, pickActiveSprint, daysLeft, toJql, epicJql, burndownSeries, attachmentUrl, initials, parseChangelogs, kpis, deliveryKpis, flowEfficiency} from './logic.js';
+import {COLUMNS, columnMap, tally, pickActiveSprint, daysLeft, toJql, epicJql, burndownSeries, attachmentUrl, initials, parseChangelogs, kpis, deliveryKpis, flowEfficiency,
+    similarJql, previewSchema, cardPrompt, mergePreview, toAdf, issueBody} from './logic.js';
 
 const assert = (cond, msg) => {
     if (!cond)
@@ -116,3 +117,24 @@ const fh = new Map([
 const fe = flowEfficiency(fc, fh, map, 'eu', ['a']);
 assert(fe.me.ratio === 0.5 && fe.me.n === 1 && fe.team.ratio === 1, `eficiência: ${JSON.stringify(fe)}`);
 ok('entrega');
+
+// novo card
+assert(similarJql('o filtro por CAT ignora grupo', 'ACME') === 'project = ACME AND text ~ "filtro ignora grupo" ORDER BY updated DESC', 'parecidos: palavras úteis, maiores primeiro');
+assert(similarJql('a de um', 'ACME') === null, 'sem palavra útil, sem busca');
+const ctx = {types: ['Bug', 'História'], priorities: ['Alta', 'Média'], sprints: [{id: 29, name: 'Sprint 29'}], epics: [{key: 'ACME-1', summary: 'Relatórios'}],
+    people: [{id: 'u1', name: 'Eu'}], similar: []};
+const sch = previewSchema(ctx);
+assert(sch.properties.sprint.enum.join() === '29,backlog' && sch.properties.points.enum.join() === '1,2,3,5,8,13', 'schema com as listas');
+const out = {summary: 'X', type: 'Bug', sprint: '29', epic: 'ACME-9', assignee: 'u1', points: 4, priority: 'Alta', description: 'd', criteria: ['c'], why: {type: 'bug'}};
+const m = mergePreview(out, {assignee: 'u1', sprint: '29'}, ctx);
+assert(m.values.epic === '' && !m.ai.has('epic'), 'épico fora da lista some');
+assert(m.values.points === null && !m.ai.has('points'), 'pontos fora da escala somem');
+assert(m.ai.has('type') && !m.ai.has('assignee') && !m.ai.has('sprint'), 'fixados não levam ✦');
+assert(mergePreview({...out, assignee: ''}, {assignee: 'u1'}, ctx).values.assignee === 'u1', 'Claude não muda fixado');
+const body = issueBody({...m.values, points: 3, epic: 'ACME-1'}, {project: 'ACME', pointsField: 'customfield_1'});
+assert(body.fields.project.key === 'ACME' && body.fields.parent.key === 'ACME-1' && body.fields.customfield_1 === 3 && !('sprint' in body.fields), 'corpo do POST');
+assert(!('parent' in issueBody({...m.values, epic: ''}, {project: 'ACME', pointsField: ''}).fields), 'sem épico, sem parent');
+const adf = toAdf('a\n\nb', ['c1', 'c2']);
+assert(adf.content.length === 4 && adf.content[2].type === 'heading' && adf.content[3].content.length === 2, 'ADF: 2 parágrafos, título, lista');
+assert(cardPrompt({text: 'pedido', fixed: {sprint: '29'}, ctx, guide: '', image: null}).includes('pedido'), 'prompt leva o pedido');
+ok('novo card');
