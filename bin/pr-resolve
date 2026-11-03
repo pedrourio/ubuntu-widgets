@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Resolve o conflito de uma PR com o Claude: clone temporário, junta a base, o Claude edita os arquivos,
+# este script confere, commita o merge e faz push. Uso: pr-resolve dono/repo número
+set -euo pipefail
+repo=$1 num=$2
+dir=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/pr-resolve.XXXXXX")
+trap 'rm -rf "$dir"' EXIT
+fail() { echo -e "\n✗ $*"; read -rp 'Enter fecha a janela. '; exit 1; }
+
+echo "→ clonando $repo"
+gh repo clone "$repo" "$dir" -- --filter=blob:none -q || fail 'clone falhou'
+cd "$dir"
+gh pr checkout "$num" || fail 'checkout da PR falhou'
+base=$(gh pr view "$num" --json baseRefName -q .baseRefName)
+echo "→ juntando $base"
+if git merge --no-edit "origin/$base"; then
+  echo '→ sem conflito com a base'
+else
+  mapfile -t files < <(git diff --name-only --diff-filter=U)
+  ((${#files[@]})) || fail 'merge falhou sem arquivos em conflito'
+  echo "→ Claude resolvendo: ${files[*]}"
+  # só lê e edita; git só para consultar histórico. Commit e push ficam com o script.
+  # prompt antes das opções: --allowedTools aceita vários valores e engoliria o que vem depois
+  claude -p "Este repositório está no meio de um merge de origin/$base na branch da PR #$num, com conflito em: ${files[*]}.
+Resolva cada conflito editando os arquivos: mantenha a intenção dos dois lados, sem marcadores <<<<<<< ======= >>>>>>>.
+Use git log/show/diff para entender cada lado. Não rode git add, commit nem push. No fim, diga em 2 linhas o que decidiu." \
+    --permission-mode acceptEdits \
+    --allowedTools Read Edit Grep Glob 'Bash(git log:*)' 'Bash(git show:*)' 'Bash(git diff:*)' \
+    </dev/null \
+    || fail 'Claude falhou'
+  git grep -nE '^(<<<<<<<|>>>>>>>)( |$)' -- "${files[@]}" && fail 'ainda há marcadores de conflito'
+  git add -- "${files[@]}"
+  git commit --no-edit -q
+fi
+git push || fail 'push falhou'
+echo -e "\n✓ $repo #$num atualizada. Fechando em 5 s."
+sleep 5

@@ -9,7 +9,7 @@ for ext in "$repo"/extensions/*/; do
   ln -sfn "${ext%/}" "$dest/$(basename "$ext")"
   echo "ligado: $(basename "$ext")"
 done
-for bin in ext-hotload ext-reload pr-status jira-token; do
+for bin in ext-hotload ext-reload pr-status pr-resolve jira-token; do
   ln -sfn "$repo/bin/$bin" "$HOME/.local/bin/$bin"
 done
 ln -sfn "$repo/extensions/screensaver@pedrourio.github.io/screensaver.sh" "$HOME/.local/bin/screensaver"

@@ -423,6 +423,8 @@ class Indicator extends PanelMenu.Button {
         actions.add_child(copy);
         if (this._cfg.extra.some(k => k.toLowerCase() === p.key.toLowerCase()))
             actions.add_child(iconButton('list-remove-symbolic', `Parar de monitorar a PR ${p.num}`, () => this._unwatch(p)));
+        if (p.conflict && p.state === 'OPEN')
+            actions.add_child(iconButton('document-edit-symbolic', `Resolver o conflito da PR ${p.num} com o Claude`, () => this._resolve(p)));
         if (p.canMerge)
             actions.add_child(this._mergeButton(p));
         row.add_child(actions);
@@ -461,6 +463,17 @@ class Indicator extends PanelMenu.Button {
         this._render();
         this._search.grab_key_focus();
         this.refresh();
+    }
+
+    // Abre um terminal com bin/pr-resolve: o Claude resolve, o script commita, faz push e fecha a janela.
+    _resolve(p) {
+        const [repo, num] = p.key.split('#');
+        try {
+            Gio.Subprocess.new(['ptyxis', '-s', '-T', `Conflito ${p.repo} #${num}`, '--', 'pr-resolve', repo, num], Gio.SubprocessFlags.NONE);
+            this.menu.close();
+        } catch (e) {
+            Main.notifyError('Não abriu o terminal', e.message);
+        }
     }
 
     // Merge em dois cliques: o primeiro só pede confirmação (some sozinho em 4 s).
