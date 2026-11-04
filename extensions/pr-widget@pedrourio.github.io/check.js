@@ -1,6 +1,7 @@
 // gjs -m check.js  → falha com exceção se alguma regra de logic.js quebrar.
 import {classify, parsePrRef, groupPrs, counts, matchesQuery, buildCardPrQuery, reviewDecision, trunkOf, groupByEpic, epicLinks, epicJqlFor, VIEWS} from './logic.js';
 
+import {staleCards, EPICS_TTL_MS} from './epics.js';
 const assert = (cond, msg) => {
     if (!cond)
         throw new Error(`FALHOU: ${msg}`);
@@ -135,3 +136,9 @@ assert(el.climb.get('MLK-2') === 'MLK-50' && !el.epics.has('MLK-2'), 'subtarefa 
 assert(el.epics.get('MLK-3') === null && el.epics.get('MLK-100')?.key === 'MLK-100', 'sem pai = sem épico; épico é o próprio');
 assert(epicJqlFor(['MLK-1', 'UTF-8x', 'MLK-2']) === 'key in (MLK-1,MLK-2)', 'JQL só com chaves válidas');
 print('ok: por épico');
+
+// cache dos épicos
+const now = 10 * EPICS_TTL_MS;
+const cache = {'MLK-1': {epic: null, at: now - 3600e3}, 'MLK-2': {epic: null, at: now - 7 * 3600e3}};
+assert(JSON.stringify(staleCards(['MLK-1', 'MLK-2', 'MLK-3'], cache, now)) === '["MLK-2","MLK-3"]', 'busca só ausentes e vencidos');
+print('ok: cache dos épicos');
