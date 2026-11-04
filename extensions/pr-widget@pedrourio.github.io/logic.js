@@ -1,7 +1,7 @@
 // Regras do widget, sem dependências do GNOME: testáveis com `gjs -m check.js`.
 
 const FRAGMENT = `fragment P on PullRequest {
-  number title url state baseRefName mergeable mergeStateStatus
+  number title url state baseRefName headRefName mergeable mergeStateStatus
   repository { nameWithOwner }
   reviews(last: 60) { nodes { author { login } state body submittedAt } }
   comments(last: 60) { nodes { author { login } createdAt } }
@@ -75,6 +75,8 @@ export function classify(pr, {me, reviewer, repoPrefix = '', cardPattern = DEFAU
         num: pr.number,
         title: pr.title,
         base: pr.baseRefName,
+        head: pr.headRefName ?? null,
+        fullRepo: pr.repository.nameWithOwner,
         state,
         status,
         reviews: bot.length,
@@ -93,7 +95,7 @@ export function classify(pr, {me, reviewer, repoPrefix = '', cardPattern = DEFAU
 const AUTO_COLORS = ['#62a0ea', '#c061cb', '#cdab8f', '#dc8add', '#99c1f1', '#f9f06b'];
 const hashColor = s => AUTO_COLORS[[...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % AUTO_COLORS.length];
 
-export const VIEWS = {status: 'Por status', group: 'Por grupo'};
+export const VIEWS = {status: 'Por status', group: 'Por grupo', epic: 'Por épico'};
 
 // Cada PR aparece uma vez por visualização.
 // status: a primeira situação que se aplica, na ordem de urgência.
@@ -166,3 +168,103 @@ export function relTime(iso, now = Date.now()) {
     const d = Math.round(h / 24);
     return d === 1 ? 'há 1 dia' : `há ${d} dias`;
 }
+
+// Trunk: a PR em cuja branch outra PR do mesmo repo mira. Devolve satélite → trunk raiz.
+// Ciclos (A mira em B e B em A) ficam de fora: nenhuma das duas é raiz.
+export function trunkOf(items) {
+    const byHead = new Map(items.filter(p => p.head).map(p => [`${p.fullRepo}:${p.head}`, p]));
+    const parent = new Map();
+    for (const p of items) {
+        const t = byHead.get(`${p.fullRepo}:${p.base}`);
+        if (t && t.key !== p.key)
+            parent.set(p.key, t.key);
+    }
+    const out = new Map();
+    for (const k of parent.keys()) {
+        const seen = new Set([k]);
+        let root = parent.get(k);
+        while (parent.has(root) && !seen.has(root)) {
+            seen.add(root);
+            root = parent.get(root);
+        }
+        if (!parent.has(root))
+            out.set(k, root);
+    }
+    return out;
+}
+
+const summarize = prs => ({ready: prs.filter(p => p.ready).length, merged: prs.filter(p => p.state === 'MERGED').length, total: prs.length});
+
+// Aba Por épico: épico (Jira) → trunk com satélites (branches) ou card → PRs. Cada PR aparece uma vez.
+// epicOf: card → {key, name} | null. Monitoradas entram no épico/trunk; só as soltas ficam no topo.
+export function groupByEpic(items, epicOf, extraKeys) {
+    const roots = trunkOf(items);
+    const byKey = new Map(items.map(p => [p.key, p]));
+    const blocks = new Map(); // trunk → satélites
+    for (const [sat, root] of roots)
+        blocks.set(root, [...(blocks.get(root) ?? []), byKey.get(sat)]);
+    const epics = new Map();
+    const epicGroup = e => {
+        if (!epics.has(e.key))
+            epics.set(e.key, {id: `epic-${e.key}`, kind: 'epic', name: `${e.key} · ${e.name}`, color: hashColor(e.key), subs: [], cards: new Map()});
+        return epics.get(e.key);
+    };
+    const trunks = [];
+    for (const [root, sats] of blocks) {
+        const t = byKey.get(root);
+        const sub = {id: `trunk-${t.key}`, kind: 'trunk', name: t.card ?? `${t.repo} #${t.num}`, trunk: t, prs: sats};
+        const e = t.card && epicOf.get(t.card);
+        if (e)
+            epicGroup(e).subs.push(sub);
+        else
+            trunks.push({id: sub.id, kind: 'trunk', name: sub.name, color: hashColor(t.key), subs: [sub]});
+    }
+    const placed = new Set([...blocks.keys(), ...roots.keys()]);
+    const extra = [], noepic = new Map(), nocard = [];
+    for (const p of items.filter(p => !placed.has(p.key))) {
+        const e = p.card && epicOf.get(p.card);
+        if (e) {
+            const g = epicGroup(e);
+            g.cards.set(p.card, [...(g.cards.get(p.card) ?? []), p]);
+        } else if (extraKeys.has(p.key)) {
+            extra.push(p);
+        } else if (p.card) {
+            noepic.set(p.card, [...(noepic.get(p.card) ?? []), p]);
+        } else {
+            nocard.push(p);
+        }
+    }
+    const cardSubs = (m, color) => [...m].map(([card, prs]) => ({id: `card-${card}`, kind: 'card', name: card, color, prs}));
+    const all = g => g.subs.flatMap(s => [...(s.trunk ? [s.trunk] : []), ...s.prs]);
+    const epicList = [...epics.values()].map(({cards, ...g}) => {
+        g.subs.push(...cardSubs(cards, g.color));
+        return {...g, summary: summarize(all(g))};
+    }).sort((a, b) => b.summary.ready - a.summary.ready || a.id.localeCompare(b.id));
+    const nogroup = {id: 'noepic', kind: 'noepic', name: 'Sem épico', color: '#9a9996', subs: cardSubs(noepic, '#9a9996')};
+    return [
+        {id: 'extra', kind: 'extra', name: 'Monitoradas por você', color: '#dc8add', prs: extra, summary: summarize(extra)},
+        ...epicList,
+        ...trunks.map(g => ({...g, summary: summarize(all(g))})),
+        {...nogroup, summary: summarize(all(nogroup))},
+        {id: 'nocard', kind: 'nocard', name: 'Sem card', color: '#77767b', prs: nocard, summary: summarize(nocard)},
+    ].filter(g => g.summary.total);
+}
+
+// Resposta de /search/jql (fields=parent,issuetype,summary) → épico de cada card, ou o pai para subir mais um nível.
+export function epicLinks(issues) {
+    const epics = new Map(), climb = new Map();
+    for (const i of issues) {
+        const par = i.fields.parent;
+        if (i.fields.issuetype?.hierarchyLevel === 1)
+            epics.set(i.key, {key: i.key, name: i.fields.summary});
+        else if (!par)
+            epics.set(i.key, null);
+        else if (par.fields?.issuetype?.hierarchyLevel === 1)
+            epics.set(i.key, {key: par.key, name: par.fields.summary});
+        else
+            climb.set(i.key, par.key);
+    }
+    return {epics, climb};
+}
+
+export const epicJqlFor = keys => `key in (${keys.filter(k => /^[A-Z][A-Z0-9]+-\d+$/.test(k)).join(',')})`;
