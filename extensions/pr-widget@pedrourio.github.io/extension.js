@@ -10,7 +10,8 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
-import {buildQuery, classify, groupPrs, counts, parsePrRef, relTime, matchesQuery, VIEWS} from './logic.js';
+import {buildQuery, classify, groupPrs, groupByEpic, counts, parsePrRef, relTime, matchesQuery, VIEWS} from './logic.js';
+import {loadEpics} from './epics.js';
 import {loadConfig, saveConfig, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 
 const COUNTERS = ['reply', 'waiting', 'ready', 'conflict'];
@@ -66,7 +67,7 @@ class Indicator extends PanelMenu.Button {
         this.menu.box.add_style_class_name('prw-menu');
         // PopupMenu vazio não abre: o conteúdo precisa existir antes do primeiro clique.
         this._cfg = loadConfig();
-        this._view = this._cfg.viewMode === 'group' ? 'group' : 'status';
+        this._view = VIEWS[this._cfg.viewMode] ? this._cfg.viewMode : 'status';
         this._render();
         this.menu.connect('open-state-changed', (_m, open) => {
             // Com o menu aberto o conteúdo não é refeito (apagaria o que está sendo digitado).
@@ -183,6 +184,8 @@ class Indicator extends PanelMenu.Button {
         this._updatedAt = Date.now();
         writeJson(CACHE_PATH, this._items.map(p => ({key: p.key, title: p.title})));
         this._updatePill();
+        if (this._view === 'epic')
+            this._loadEpics();
         // consulta que já estava rodando quando a PR foi adicionada: não tem a PR nova, pergunta de novo
         if (this._adding && !this._queried.includes(this._adding)) {
             this.refresh();
@@ -256,6 +259,9 @@ class Indicator extends PanelMenu.Button {
             const btn = new St.Button({child: tab, can_focus: true, toggle_mode: true, checked: this._view === id, style_class: 'prw-view'});
             btn.connect('clicked', () => {
                 this._view = id;
+                // Jira só quando a aba é usada; cards já vistos vêm do cache, sem rede
+                if (id === 'epic')
+                    this._loadEpics();
                 this._render();
             });
             views.add_child(btn);
@@ -290,8 +296,15 @@ class Indicator extends PanelMenu.Button {
         const list = new St.BoxLayout({vertical: true, style_class: 'prw-list'});
         const extraKeys = new Set(this._cfg.extra);
         this._groupRefs = [];
-        for (const g of groupPrs(this._items, this._cfg, extraKeys, this._view))
-            list.add_child(this._group(g));
+        if (this._view === 'epic') {
+            if (this._epicError)
+                content.add_child(label('Jira não configurado: agrupando só por trunk', 'prw-muted'));
+            for (const g of groupByEpic(this._items, this._epicOf ?? new Map(), extraKeys))
+                list.add_child(this._epicGroup(g));
+        } else {
+            for (const g of groupPrs(this._items, this._cfg, extraKeys, this._view))
+                list.add_child(this._group(g));
+        }
         this._noMatch = label('Nenhuma PR encontrada.', 'prw-muted', {visible: false});
         list.add_child(this._noMatch);
         const scroll = new St.ScrollView({style_class: 'prw-scroll', hscrollbar_policy: St.PolicyType.NEVER, vscrollbar_policy: St.PolicyType.AUTOMATIC});
@@ -327,9 +340,36 @@ class Indicator extends PanelMenu.Button {
             : 'Atualizando…';
     }
 
-    _group(g) {
+    async _loadEpics() {
+        const cards = [...new Set(this._items.map(p => p.card).filter(Boolean))];
+        const {epicOf, error} = await loadEpics(cards, {jiraDir: Main.extensionManager.lookup('jira-widget@pedrourio.github.io')?.path});
+        if (this._destroyed)
+            return;
+        const changed = error !== this._epicError || JSON.stringify([...epicOf]) !== JSON.stringify([...(this._epicOf ?? [])]);
+        this._epicOf = epicOf;
+        this._epicError = error;
+        if (changed && this._view === 'epic')
+            this._renderWhenClosed();
+    }
+
+    // Aba Por épico: épico → subgrupos (trunk ou card) → PRs recuadas.
+    _epicGroup(g) {
+        const s = g.summary;
+        const note = `${s.ready} prontas${s.merged ? ` · ${s.merged} merged` : ''} · ${s.total} PRs`;
+        const top = {...g, id: `ep:${g.id}`, note, prs: g.prs ?? g.subs.flatMap(sub => [...(sub.trunk ? [sub.trunk] : []), ...sub.prs])};
+        if (g.prs)
+            return this._group(top, {cls: 'prw-epic-header'});
+        return this._group(top, {cls: 'prw-epic-header', fill: rows => g.subs.flatMap(sub => {
+            const prs = sub.trunk ? [sub.trunk, ...sub.prs] : sub.prs;
+            rows.add_child(this._group({id: `ep:${g.id}:${sub.id}`, name: sub.name, color: g.color, prs, note: ''},
+                {cls: 'prw-sub-header', tag: sub.kind === 'trunk' ? 'trunk' : null, nested: true, chip: sub.kind === 'trunk'}));
+            return this._groupRefs.at(-1).items;
+        })});
+    }
+
+    _group(g, {cls = '', fill = null, tag = null, nested = false, chip = false} = {}) {
         const box = new St.BoxLayout({vertical: true, style_class: 'prw-group'});
-        const head = new St.BoxLayout({style_class: 'prw-group-header'});
+        const head = new St.BoxLayout({style_class: `prw-group-header ${cls}`});
         const rows = new St.BoxLayout({vertical: true, visible: !this._collapsed.has(g.id)});
         const toggle = iconButton(rows.visible ? 'pan-down-symbolic' : 'pan-end-symbolic', `Recolher ou expandir ${g.name}`, () => {
             rows.visible = !rows.visible;
@@ -343,7 +383,9 @@ class Indicator extends PanelMenu.Button {
         toggle.add_style_class_name('prw-toggle');
         head.add_child(toggle);
         // a cor do grupo só importa na visão por grupo; por status o ícone de cada PR já diz
-        if (this._view === 'group')
+        if (tag)
+            head.add_child(label(tag, 'prw-trunk-tag', {y_align: Clutter.ActorAlign.CENTER}));
+        if (this._view !== 'status')
             head.add_child(new St.Widget({style_class: 'prw-dot', style: `background-color: ${g.color};`, y_align: Clutter.ActorAlign.CENTER}));
         head.add_child(label(g.name, 'prw-group-name'));
         head.add_child(label(String(g.prs.length), 'prw-counter', {accessible_name: `${g.prs.length} PRs`}));
@@ -351,16 +393,21 @@ class Indicator extends PanelMenu.Button {
         const note = g.note ?? (conflicts && g.id !== 'conflict' ? `${conflicts} com conflito` : '');
         head.add_child(label(note, 'prw-muted prw-note', {x_expand: true, x_align: Clutter.ActorAlign.END}));
         box.add_child(head);
-        const items = g.prs.map(p => ({p, row: this._row(p)}));
-        for (const {row} of items)
-            rows.add_child(row);
+        let items;
+        if (fill) {
+            items = fill(rows);
+        } else {
+            items = g.prs.map(p => ({p, row: this._row(p, {nested, chip})}));
+            for (const {row} of items)
+                rows.add_child(row);
+        }
         box.add_child(rows);
         this._groupRefs.push({id: g.id, box, rows, toggle, items});
         return box;
     }
 
-    _row(p) {
-        const row = new St.BoxLayout({style_class: 'prw-row', reactive: true, track_hover: true, can_focus: true});
+    _row(p, {nested = false, chip = false} = {}) {
+        const row = new St.BoxLayout({style_class: `prw-row${nested ? ' prw-row-nested' : ''}`, reactive: true, track_hover: true, can_focus: true});
         const [state] = STATE.find(([, test]) => test(p));
         row.add_child(new St.Icon({
             gicon: Gio.icon_new_for_string(`${this._ext.path}/state-${state === 'closed' ? 'open' : state}-symbolic.svg`),
@@ -376,6 +423,9 @@ class Indicator extends PanelMenu.Button {
 
         // tudo que não é o título numa linha cinza; só o conflito ganha cor
         const parts = [esc(`${p.repo} #${p.num}`), esc(STATUS[p.status])];
+        // satélites e trunk: o card de cada um, já que podem vir de cards diferentes
+        if (chip && p.card)
+            parts.unshift(`<b>${esc(p.card)}</b>`);
         if (p.waitingBot)
             parts.push('você respondeu');
         if (p.conflict)

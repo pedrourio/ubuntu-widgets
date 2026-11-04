@@ -78,3 +78,11 @@
 .prw-merge { padding: 0 12px; height: 30px; border-radius: 6px; background-color: #347d39; color: #ffffff; font-weight: 600; }
 .prw-merge:hover, .prw-merge:focus { background-color: #46954a; }
 .prw-merge-armed, .prw-merge-armed:hover, .prw-merge-armed:focus { background-color: #c69026; color: #1c2128; }
+
+/* aba Por épico (prancheta "PRs · agrupar por épico", versão B) */
+.prw-epic-header { background-color: #373e47; border-radius: 6px; margin-top: 12px; border-bottom: 0; }
+.prw-epic-header .prw-group-name { color: #ffffff; font-weight: 700; }
+.prw-sub-header { background-color: transparent; border-bottom: 0; padding: 4px 8px 4px 14px; }
+.prw-sub-header .prw-group-name { font-size: 0.95em; }
+.prw-row-nested { margin-left: 56px; padding-left: 14px; border-left: 2px solid #444c56; border-bottom: 0; }
+.prw-trunk-tag { padding: 0 7px; border-radius: 10px; background-color: #1c2b41; color: #85b8ff; font-size: 0.8em; font-weight: bold; }
