@@ -1,8 +1,9 @@
-// Mesmas regras do pr-widget, no terminal. Uso: pr-status [--view status|group] [busca]
+// Mesmas regras do pr-widget, no terminal. Uso: pr-status [--view status|group|epic] [busca]
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
-import {buildQuery, classify, groupPrs, counts, relTime, matchesQuery} from '../extensions/pr-widget@pedrourio.github.io/logic.js';
+import {buildQuery, classify, groupPrs, groupByEpic, counts, relTime, matchesQuery} from '../extensions/pr-widget@pedrourio.github.io/logic.js';
 import {loadConfig} from '../extensions/pr-widget@pedrourio.github.io/config.js';
+import {loadEpics} from '../extensions/pr-widget@pedrourio.github.io/epics.js';
 
 const args = [...ARGV];
 const viewAt = args.indexOf('--view');
@@ -48,20 +49,41 @@ if (query)
     print(`busca "${query}": ${shown.length} PR(s)`);
 
 const STATUS = {pass: 'PASS', approved: 'aprovada', warn: 'WARN', changes: 'mudanças pedidas', none: 'sem review'};
-for (const g of groupPrs(shown, cfg, new Set(cfg.extra), view)) {
-    print(`\n## ${g.name} (${g.prs.length})`);
-    for (const p of g.prs) {
-        const flags = [
-            p.state === 'MERGED' && 'MERGED',
-            p.state === 'CLOSED' && 'FECHADA',
-            p.needsReply && `sem resposta sua ${relTime(p.since)}`,
-            p.waitingBot && `você respondeu ${relTime(p.since)}`,
-            p.ready && 'pronta para merge',
-            p.conflict && `conflito com ${p.base}`,
-            p.canMerge && 'GitHub libera merge',
-        ].filter(Boolean);
-        print(`- ${p.repo}#${p.num} [${STATUS[p.status]}, ${p.reviews} review(s) do ${who}]${flags.length ? ` ${flags.join(' · ')}` : ''}`);
-        print(`  ${p.title}`);
-        print(`  ${p.url}`);
+const printPr = (p, pad = '', chip = false) => {
+    const flags = [
+        p.state === 'MERGED' && 'MERGED',
+        p.state === 'CLOSED' && 'FECHADA',
+        p.needsReply && `sem resposta sua ${relTime(p.since)}`,
+        p.waitingBot && `você respondeu ${relTime(p.since)}`,
+        p.ready && 'pronta para merge',
+        p.conflict && `conflito com ${p.base}`,
+        p.canMerge && 'GitHub libera merge',
+    ].filter(Boolean);
+    print(`${pad}- ${p.repo}#${p.num} [${STATUS[p.status]}, ${p.reviews} review(s) do ${who}]${flags.length ? ` ${flags.join(' · ')}` : ''}`);
+    print(`${pad}  ${chip && p.card ? `[${p.card}] ` : ''}${p.title}`);
+    print(`${pad}  ${p.url}`);
+};
+
+if (view === 'epic') {
+    const jiraDir = GLib.build_filenamev([GLib.path_get_dirname(GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0])), 'extensions', 'jira-widget@pedrourio.github.io']);
+    const {epicOf, error} = await loadEpics([...new Set(shown.map(p => p.card).filter(Boolean))], {jiraDir});
+    if (error)
+        print('(Jira não configurado: agrupando só por trunk)');
+    for (const g of groupByEpic(shown, epicOf, new Set(cfg.extra))) {
+        const s = g.summary;
+        print(`\n## ${g.name} (${s.ready} prontas${s.merged ? ` · ${s.merged} merged` : ''} · ${s.total} PRs)`);
+        for (const p of g.prs ?? [])
+            printPr(p);
+        for (const sub of g.subs ?? []) {
+            print(`\n### ${sub.kind === 'trunk' ? `trunk ${sub.trunk.repo}#${sub.trunk.num}` : sub.name}`);
+            for (const p of sub.trunk ? [sub.trunk, ...sub.prs] : sub.prs)
+                printPr(p, '  ', sub.kind === 'trunk');
+        }
+    }
+} else {
+    for (const g of groupPrs(shown, cfg, new Set(cfg.extra), view)) {
+        print(`\n## ${g.name} (${g.prs.length})`);
+        for (const p of g.prs)
+            printPr(p);
     }
 }
