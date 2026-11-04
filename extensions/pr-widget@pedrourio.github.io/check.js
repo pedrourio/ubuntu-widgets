@@ -1,7 +1,7 @@
 // gjs -m check.js  → falha com exceção se alguma regra de logic.js quebrar.
 import {classify, parsePrRef, groupPrs, counts, matchesQuery, buildCardPrQuery, reviewDecision, trunkOf, groupByEpic, epicLinks, epicJqlFor, VIEWS} from './logic.js';
 
-import {staleCards, EPICS_TTL_MS} from './epics.js';
+import {staleCards, EPICS_TTL_MS, epicsFromCache, jiraKeys, canFetch} from './epics.js';
 const assert = (cond, msg) => {
     if (!cond)
         throw new Error(`FALHOU: ${msg}`);
@@ -142,3 +142,17 @@ const now = 10 * EPICS_TTL_MS;
 const cache = {'MLK-1': {epic: null, at: now - 3600e3}, 'MLK-2': {epic: null, at: now - 7 * 3600e3}};
 assert(JSON.stringify(staleCards(['MLK-1', 'MLK-2', 'MLK-3'], cache, now)) === '["MLK-2","MLK-3"]', 'busca só ausentes e vencidos');
 print('ok: cache dos épicos');
+
+// achados da revisão
+// 1. cache lido na hora, sem esperar a rede
+assert(epicsFromCache(['MLK-1', 'MLK-9'], {'MLK-1': {epic: E, at: 1}}).get('MLK-1') === E && !epicsFromCache(['MLK-9'], {}).has('MLK-9'), 'épicos do cache sem rede');
+// 2. PR de promoção (head = branch longa) ou de fork não vira trunk
+const prom = mk(10, {head: 'base', base: 'master'}), feat = mk(11, {card: 'MLK-1', base: 'base'});
+assert(trunkOf([prom, feat]).size === 0, 'PR base→master não vira trunk');
+assert(trunkOf([{...mk(1, {head: 'feat/t'}), headRepo: 'Fork/back'}, mk(2, {base: 'feat/t'})]).size === 0, 'PR de fork não vira trunk');
+assert(trunkOf([{...mk(1, {head: 'feat/t'}), headRepo: 'Org/back'}, mk(2, {base: 'feat/t'})]).size === 1, 'mesmo repo liga');
+// 3. só chaves do projeto vão ao Jira; falha recente segura novas buscas
+assert(JSON.stringify(jiraKeys(['MLK-1', 'NR-7', 'SHA-256'], 'MLK')) === '["MLK-1"]', 'só o projeto do Jira');
+assert(JSON.stringify(jiraKeys(['MLK-1', 'NR-7', 'utf-8'], '')) === '["MLK-1","NR-7"]', 'sem projeto: só a forma da chave');
+assert(!canFetch({'#failedAt': now - 60e3}, now) && canFetch({'#failedAt': now - 3600e3}, now) && canFetch({}, now), 'espera 30 min depois de uma falha');
+print('ok: achados da revisão');

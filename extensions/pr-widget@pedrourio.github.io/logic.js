@@ -1,7 +1,7 @@
 // Regras do widget, sem dependências do GNOME: testáveis com `gjs -m check.js`.
 
 const FRAGMENT = `fragment P on PullRequest {
-  number title url state baseRefName headRefName mergeable mergeStateStatus
+  number title url state baseRefName headRefName headRepository { nameWithOwner } mergeable mergeStateStatus
   repository { nameWithOwner }
   reviews(last: 60) { nodes { author { login } state body submittedAt } }
   comments(last: 60) { nodes { author { login } createdAt } }
@@ -76,6 +76,7 @@ export function classify(pr, {me, reviewer, repoPrefix = '', cardPattern = DEFAU
         title: pr.title,
         base: pr.baseRefName,
         head: pr.headRefName ?? null,
+        headRepo: pr.headRepository?.nameWithOwner ?? null,
         fullRepo: pr.repository.nameWithOwner,
         state,
         status,
@@ -171,8 +172,13 @@ export function relTime(iso, now = Date.now()) {
 
 // Trunk: a PR em cuja branch outra PR do mesmo repo mira. Devolve satélite → trunk raiz.
 // Ciclos (A mira em B e B em A) ficam de fora: nenhuma das duas é raiz.
+// Não viram trunk: PR de fork (a branch é de outro repo) e PR de promoção/sync (head = branch longa, ex.: base→master).
+export const LONG_BRANCHES = ['main', 'master', 'base', 'develop', 'staging'];
 export function trunkOf(items) {
-    const byHead = new Map(items.filter(p => p.head).map(p => [`${p.fullRepo}:${p.head}`, p]));
+    const byHead = new Map(items.filter(p => p.head && !LONG_BRANCHES.includes(p.head) && (!p.headRepo || p.headRepo === p.fullRepo))
+        // duas PRs na mesma branch (uma mergeada, outra reaberta): vale a aberta
+        .sort((a, b) => (a.state === 'OPEN') - (b.state === 'OPEN'))
+        .map(p => [`${p.fullRepo}:${p.head}`, p]));
     const parent = new Map();
     for (const p of items) {
         const t = byHead.get(`${p.fullRepo}:${p.base}`);
@@ -267,4 +273,5 @@ export function epicLinks(issues) {
     return {epics, climb};
 }
 
-export const epicJqlFor = keys => `key in (${keys.filter(k => /^[A-Z][A-Z0-9]+-\d+$/.test(k)).join(',')})`;
+export const ISSUE_KEY = /^[A-Z][A-Z0-9]+-\d+$/;
+export const epicJqlFor = keys => `key in (${keys.filter(k => ISSUE_KEY.test(k)).join(',')})`;

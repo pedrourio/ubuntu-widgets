@@ -11,7 +11,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {buildQuery, classify, groupPrs, groupByEpic, counts, parsePrRef, relTime, matchesQuery, VIEWS} from './logic.js';
-import {loadEpics} from './epics.js';
+import {loadEpics, cachedEpics} from './epics.js';
 import {loadConfig, saveConfig, writeJson, CONFIG_PATH, CACHE_PATH} from './config.js';
 
 const COUNTERS = ['reply', 'waiting', 'ready', 'conflict'];
@@ -260,8 +260,10 @@ class Indicator extends PanelMenu.Button {
             btn.connect('clicked', () => {
                 this._view = id;
                 // Jira só quando a aba é usada; cards já vistos vêm do cache, sem rede
-                if (id === 'epic')
+                if (id === 'epic') {
+                    this._epicOf ??= cachedEpics([...new Set(this._items.map(p => p.card).filter(Boolean))]);
                     this._loadEpics();
+                }
                 this._render();
             });
             views.add_child(btn);
@@ -348,7 +350,12 @@ class Indicator extends PanelMenu.Button {
         const changed = error !== this._epicError || JSON.stringify([...epicOf]) !== JSON.stringify([...(this._epicOf ?? [])]);
         this._epicOf = epicOf;
         this._epicError = error;
-        if (changed && this._view === 'epic')
+        if (!changed || this._view !== 'epic')
+            return;
+        // menu aberto: redesenha já, a menos que esteja digitando na busca (redesenhar apagaria o texto)
+        if (this.menu.isOpen && !(this._query ?? '').trim())
+            this._render();
+        else
             this._renderWhenClosed();
     }
 
