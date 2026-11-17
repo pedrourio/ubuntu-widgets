@@ -7,12 +7,21 @@ repo=$1 num=$2
 dir=$(mktemp -d "${XDG_CACHE_HOME:-$HOME/.cache}/pr-resolve.XXXXXX")
 trap 'rm -rf "$dir"' EXIT
 fail() { echo -e "\n✗ $*"; read -rp 'Enter fecha a janela. '; exit 1; }
+# Django: números de migração repetidos nas pastas de migração que a PR mexe (o git não acusa: são arquivos diferentes)
+dup_migrations() {
+  local d
+  for d in $(printf '%s\n' "$@" | xargs -rn1 dirname | sort -u); do
+    ls "$d" 2>/dev/null | grep -oE '^[0-9]{4}' | sort | uniq -d | sed "s|^|$d/|"
+  done
+}
 
 echo "→ clonando $repo"
 gh repo clone "$repo" "$dir" -- --filter=blob:none -q || fail 'clone falhou'
 cd "$dir"
 gh pr checkout "$num" || fail 'checkout da PR falhou'
 base=$(gh pr view "$num" --json baseRefName -q .baseRefName)
+pr_head=$(git rev-parse HEAD)
+mapfile -t pr_migs < <(git diff --name-only --diff-filter=A "$(git merge-base "$pr_head" "origin/$base")" "$pr_head" -- '*/migrations/[0-9][0-9][0-9][0-9]_*.py')
 echo "→ juntando $base"
 if git merge --no-edit "origin/$base"; then
   echo '→ sem conflito com a base'
@@ -32,6 +41,22 @@ Use git log/show/diff para entender cada lado. Não rode git add, commit nem pus
   git grep -nE '^(<<<<<<<|>>>>>>>)( |$)' -- "${files[@]}" && fail 'ainda há marcadores de conflito'
   git add -- "${files[@]}"
   git commit --no-edit -q
+fi
+if ((${#pr_migs[@]})) && dups=$(dup_migrations "${pr_migs[@]}") && [[ -n $dups ]]; then
+  echo "→ migração com número repetido depois do merge: $dups"
+  claude -p "Depois do merge de origin/$base na branch da PR #$num, há migrações Django com o mesmo número no mesmo app: $dups.
+As migrações criadas por esta PR são: ${pr_migs[*]}. As da base já foram aplicadas em outros ambientes: não mexa nelas.
+Renumere só as migrações desta PR para virem depois da última migração da base no mesmo app (git mv), e atualize 'dependencies' delas
+(a primeira passa a depender da última da base; as seguintes, da anterior renumerada) e qualquer outra referência ao nome antigo no repositório.
+Não crie migração de merge. Não rode git add, commit nem push. No fim, diga em 2 linhas o que renumerou." \
+    --permission-mode acceptEdits \
+    --allowedTools Read Edit Grep Glob 'Bash(git mv:*)' 'Bash(git log:*)' 'Bash(git show:*)' 'Bash(git diff:*)' 'Bash(ls:*)' \
+    </dev/null \
+    || fail 'Claude falhou nas migrações'
+  left=$(dup_migrations "${pr_migs[@]}")
+  [[ -z $left ]] || fail "ainda há número repetido: $left"
+  git add -A  # clone temporário: só há as mudanças do Claude (migrações e quem as referencia)
+  git commit -q -m "Renumera migrações depois do merge de $base" || fail 'commit das migrações falhou'
 fi
 git push || fail 'push falhou'
 echo -e "\n✓ $repo #$num atualizada. Fechando em 5 s."
