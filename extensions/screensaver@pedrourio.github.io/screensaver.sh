@@ -16,7 +16,9 @@ while true; do
   clear
   tput civis
   pick=$(( RANDOM % 5 ))
-  if (( pick == 1 )); then
+  if (( pick == 2 )) && (( 10#$(date +%m) >= 11 )); then
+    python3 -I "$here/natal.py" --seconds 45 &  # 1 vez em 5, só em novembro e dezembro: a noite de Natal
+  elif (( pick == 1 )); then
     python3 -I "$here/bird.py" &  # 1 vez em 5: a ave trazendo o logo
   elif (( pick == 0 )) && [[ -x /usr/games/cbonsai ]]; then
     # 1 vez em 5: bonsais crescendo por 40 s. LC_ALL=C: com locale pt o cbonsai não lê "0.01";
