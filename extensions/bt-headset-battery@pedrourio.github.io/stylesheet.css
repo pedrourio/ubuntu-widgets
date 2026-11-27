@@ -4,3 +4,22 @@
 .bthb-fill.mid { background-color: #f6d32d; }
 .bthb-fill.low { background-color: #ed333b; }
 .bthb-label { font-size: 0.9em; }
+
+/* etiqueta do modo na barra: só o texto na cor do modo */
+.bthb-badge { font-size: 0.75em; font-weight: bold; }
+.bthb-badge-anc { color: #62a0ea; }
+.bthb-badge-ambient { color: #f6d32d; }
+
+/* menu */
+.bthb-menu { min-width: 300px; }
+.bthb-head { spacing: 6px; }
+.bthb-name { font-weight: bold; }
+.bthb-wave { margin: 2px 0; }
+.bthb-section { font-size: 0.75em; font-weight: bold; color: rgba(255, 255, 255, 0.5); }
+.bthb-status { font-size: 0.85em; color: rgba(255, 255, 255, 0.6); }
+/* modos: cinza fora de uso; o selecionado ganha a cor no texto e no ícone, sem fundo */
+.bthb-mode { color: rgba(255, 255, 255, 0.45); }
+.bthb-on-normal { color: #57e389; font-weight: bold; }
+.bthb-on-anc { color: #62a0ea; font-weight: bold; }
+.bthb-on-ambient { color: #f6d32d; font-weight: bold; }
+.bthb-pending { opacity: 0.6; }

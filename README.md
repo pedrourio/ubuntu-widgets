@@ -8,7 +8,7 @@ Extensões pequenas para a barra do topo do GNOME Shell 50 (Wayland), feitas par
 | `pr-status` + skill do Claude Code | O mesmo status das PRs no terminal (`pr-status [--view status\|group\|epic] [busca]`) e a skill `pr-status`, que faz o Claude consultar por ele. Usa o mesmo `logic.js` do widget. |
 | `screensaver` | Tela de descanso no estilo do Omarchy: depois de alguns minutos parado, um terminal em tela cheia anima o símbolo `</>` com o TerminalTextEffects. |
 | `printmark` | Fora do shell (Rust + GTK4): o `Print` abre a captura nativa do GNOME, que pega todos os monitores, e depois um editor para marcar a imagem (seta, retângulo, texto, tarja) e copiar. Compilação, atalho e teclas em [`printmark/README.md`](printmark/README.md). |
-| `bt-headset-battery` | Ícone do fone Bluetooth conectado com barra e porcentagem de bateria (lida do UPower). |
+| `bt-headset-battery` | Ícone do fone Bluetooth conectado com barra e porcentagem de bateria (lida do UPower). O clique abre um painel com a bateria e a onda do som que está saindo no computador (monitor do PipeWire via `pw-record`, nunca o microfone), que alterna entre barras, Siri, curva preenchida e pontos numa transformação coluna a coluna e começa num estilo sorteado. No QCY MeloBuds N20, o painel também troca o modo de áudio (Normal, ANC adaptativo, Ambiente) por BLE, com os mesmos comandos do app oficial; com ANC ou Ambiente, a barra mostra ANC/AMB na cor do modo. Captura, BLE e animação só rodam com o painel aberto. Testes: `gjs -m check.js` na pasta da extensão. |
 
 ## Instalar
 
