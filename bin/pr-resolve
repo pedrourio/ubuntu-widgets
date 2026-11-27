@@ -28,17 +28,26 @@ if git merge --no-edit "origin/$base"; then
 else
   mapfile -t files < <(git diff --name-only --diff-filter=U)
   ((${#files[@]})) || fail 'merge falhou sem arquivos em conflito'
-  echo "→ Claude resolvendo: ${files[*]}"
+  # .mo é binário gerado do .po: o Claude não mexe nele; o script recompila depois
+  mapfile -t texts < <(printf '%s\n' "${files[@]}" | grep -v '\.mo$' || true)
+  mapfile -t mos < <(printf '%s\n' "${files[@]}" | grep '\.mo$' || true)
   # só lê e edita; git só para consultar histórico. Commit e push ficam com o script.
   # prompt antes das opções: --allowedTools aceita vários valores e engoliria o que vem depois
-  claude -p "Este repositório está no meio de um merge de origin/$base na branch da PR #$num, com conflito em: ${files[*]}.
+  if ((${#texts[@]})); then
+    echo "→ Claude resolvendo: ${texts[*]}"
+    claude -p "Este repositório está no meio de um merge de origin/$base na branch da PR #$num, com conflito em: ${texts[*]}.
 Resolva cada conflito editando os arquivos: mantenha a intenção dos dois lados, sem marcadores <<<<<<< ======= >>>>>>>.
 Use git log/show/diff para entender cada lado. Não rode git add, commit nem push. No fim, diga em 2 linhas o que decidiu." \
-    --permission-mode acceptEdits \
-    --allowedTools Read Edit Grep Glob 'Bash(git log:*)' 'Bash(git show:*)' 'Bash(git diff:*)' \
-    </dev/null \
-    || fail 'Claude falhou'
-  git grep -nE '^(<<<<<<<|>>>>>>>)( |$)' -- "${files[@]}" && fail 'ainda há marcadores de conflito'
+      --permission-mode acceptEdits \
+      --allowedTools Read Edit Grep Glob 'Bash(git log:*)' 'Bash(git show:*)' 'Bash(git diff:*)' \
+      </dev/null \
+      || fail 'Claude falhou'
+  fi
+  ((${#texts[@]})) && git grep -nE '^(<<<<<<<|>>>>>>>)( |$)' -- "${texts[@]}" && fail 'ainda há marcadores de conflito'
+  for mo in "${mos[@]}"; do
+    echo "→ recompilando $mo"
+    msgfmt --check -o "$mo" "${mo%.mo}.po" || fail "não deu para compilar $mo (o gettext está instalado?)"
+  done
   git add -- "${files[@]}"
   git commit --no-edit -q
 fi
@@ -58,6 +67,6 @@ Não crie migração de merge. Não rode git add, commit nem push. No fim, diga 
   git add -A  # clone temporário: só há as mudanças do Claude (migrações e quem as referencia)
   git commit -q -m "Renumera migrações depois do merge de $base" || fail 'commit das migrações falhou'
 fi
-git push || fail 'push falhou'
+git push || fail 'push recusado: a branch mudou no GitHub enquanto resolvia (outro push na mesma PR). Clique em resolver de novo.'
 echo -e "\n✓ $repo #$num atualizada. Fechando em 5 s."
 sleep 5
